@@ -55,10 +55,12 @@ echo "   ✅ 干净"
 
 echo "→ 3/4 同步到本地仓（NAS）"
 mkdir -p "$LOCAL"
-rsync -a --delete --exclude='.git' "$STAGE"/ "$LOCAL"/ 2>/dev/null || {
-  rm -rf "$LOCAL"; mkdir -p "$LOCAL"; cp -r "$STAGE"/. "$LOCAL"/; }
+# 只同步工作区文件，绝不动 .git（rsync --delete 会连带删掉 .git/config 里的 remote）
+rsync -a --delete --exclude='.git/' "$STAGE"/ "$LOCAL"/ 2>/dev/null \
+  || { find "$LOCAL" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + 2>/dev/null; cp -r "$STAGE"/. "$LOCAL"/; }
 if [ ! -d "$LOCAL/.git" ]; then
   git -C "$LOCAL" init -q -b main
+  git -C "$LOCAL" remote add origin https://github.com/superxzy2012/xiaoka-skills.git
   git -C "$LOCAL" config user.name xiaoka-bot
   git -C "$LOCAL" config user.email xiaoka@local
 fi
@@ -71,6 +73,9 @@ else
 fi
 
 echo "→ 4/4 push 到 GitHub"
+if ! git -C "$LOCAL" remote get-url "$REMOTE" >/dev/null 2>&1; then
+  git -C "$LOCAL" remote add "$REMOTE" https://github.com/superxzy2012/xiaoka-skills.git 2>/dev/null
+fi
 if git -C "$LOCAL" remote get-url "$REMOTE" >/dev/null 2>&1; then
   for i in 1 2 3; do
     if git -C "$LOCAL" push -q "$REMOTE" main 2>/dev/null; then
