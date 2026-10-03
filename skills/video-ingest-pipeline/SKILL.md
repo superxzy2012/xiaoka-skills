@@ -75,7 +75,48 @@ such links; or a task needs durable notes built from video content.
   warning. Check that the cookies you actually need survived the export.
 - **Writing outside the writable root fails for file tools** but not for shell `cp`/`ln`. Build
   the note locally, then copy into the vault; `os.makedirs` the destination dir first.
+- **On screen-recording videos, frame OCR cannot recover the project name.** Burning-in subtitles
+  sit at low contrast and OCR reads only scattered fragments; cropping and upscaling the region
+  that should hold the identifier makes it *worse* (blur, not resolution). For those, treat the
+  transcript's candidate names as hypotheses and confirm each with a live lookup — never assert
+  the tool in the notes from OCR alone.
 
 ## Depth
 - `references/platform-routes.md` — verified fetch route per platform, frame-OCR corrections, batch-OCR cost.
 - `scripts/ingest_one.py` — the single-link ingest flow end to end, ready to adapt.
+
+## Open-source project videos: verify, don't transcribe
+
+Many of these videos are project showcases. A transcript plus a star count is not a finding —
+the sponsorable errors live in the claim the video is making.
+
+For every project named in the note, confirm against live data and write a FACT/claim table:
+repo owner/name, star count, license, last push, and whether it is still maintained.
+The claims that most often break:
+
+- **"36K stars"** — often right, but read it off the API at the same moment you write the note so
+  the number has a date attached.
+- **"Docker deployment"** — check the official README/docs, not just the video. A desktop
+  Electron app's docs listing only Linux/macOS/Windows/Android with no Docker mention means
+  there is no official image; the video is running a third-party one. Name the official
+  component when one exists and it does something narrower (a sync server is not a media server).
+- **"Open source" with no license visible** — see below.
+
+**Never resolve a license from the GitHub API alone.** `license.spdx_id` returns `NOASSERTION`
+whenever the LICENSE file carries custom prose above the standard text, which reads as
+"unlicensed". Pull the LICENSE text and judge it yourself. Beware the reverse trap too: a bare
+`noncommercial` substring matches AGPL-3.0 section 6(b) ("allowed only occasionally and
+noncommercially"), which is a condition on *offering source*, not a ban on commercial use —
+that misread will wrongly disqualify a perfectly AGPL project.
+
+When the video promotes a tool this machine already has a skill for, diff them explicitly: a
+local skill and an upstream project can share a name and be entirely different things (local one
+a Markdown workflow template, upstream a TypeScript web app). Say so in the note rather than
+letting the name collision imply coverage.
+
+## Archiving
+
+Frames, transcripts, OCR scripts, and pulled source all belong under
+`15-小卡工作区/<workspace>/开源源码/<project>/` — `cache/scratch/` is pruned after 24h idle,
+so anything left there will need re-downloading. Copy artifacts in, then fix the path references
+inside the note so they point at the permanent location.

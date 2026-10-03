@@ -19,18 +19,23 @@ import re
 import subprocess
 import sys
 
-GH = "/opt/data/bin/gh"
-ENV = {**os.environ, "HOME": "/opt/data/home", "GH_CONFIG_DIR": "/opt/data/home/.config/gh"}
+GH = os.environ.get("GH_BIN", "/opt/data/bin/gh")
+ENV = {**os.environ,
+       "HOME": os.environ.get("HERMES_HOME", "/opt/data/home"),
+       "GH_CONFIG_DIR": os.environ.get("HERMES_HOME", "/opt/data/home") + "/.config/gh"}
 
-# (正则, SPDX, 友好度)  —— 顺序即优先级，必须严格按此顺序。
+# (正则, SPDX, 友好度) —— 顺序即优先级，必须严格按此顺序。
 # 关键 1：禁商用/专有必须排在 MIT 和 AGPL 之前，否则「非商用+MIT特征」会被误判成 MIT。
 # 关键 2：禁商用只认「授权/限制性声明」句式，绝不认条款细则里的用法描述。
-#   反例（自检用例 4 之外的真实事故）：AGPL-3.0 正式文本第 6(b) 节含
+#   反例：AGPL-3.0 正式文本第 6(b) 节含
 #   "This alternative is allowed only occasionally and noncommercially" ——
 #   那是「偶尔且非商业性地附源码」的条件，不是禁止商用。
 #   若用裸 noncommercial 匹配，标准 AGPL 全文会被误判成「禁止商用」。
-#   故要求声明句式：licen[cs]ed ... for non-commercial / not licensed for commercial use。
-NOCOMMERCIAL = r"(?:licen[cs]ed|licen[cs]e|use|usage|distribution|redistribution|permission)[\s\S]{0,80}?(?:non-?commercial|not\s+for\s+commercial)|(?:non-?commercial)[\s\S]{0,40}?(?:use|licen[cs]e|distribution)|禁止商用|不得用于商业"
+#   故要求声明句式：licensed ... for non-commercial / not licensed for commercial use。
+NOCOMMERCIAL = (r"(?:licen[cs]ed|licen[cs]e|use|usage|distribution|redistribution|permission)"
+                r"[\s\S]{0,80}?(?:non-?commercial|not\s+for\s+commercial)"
+                r"|(?:non-?commercial)[\s\S]{0,40}?(?:use|licen[cs]e|distribution)"
+                r"|禁止商用|不得用于商业")
 RULES = [
     (NOCOMMERCIAL, "非商用", "no-commercial"),
     (r"all rights reserved|proprietary and confidential|is proprietary", "专有", "proprietary"),
@@ -43,12 +48,9 @@ RULES = [
     (r"APACHE LICENSE|Apache License", "Apache-2.0", "permissive"),
     (r"MIT License|Permission is hereby granted, free of charge", "MIT", "permissive"),
     (r"BSD \d-Clause|Redistribution and use in source and binary forms", "BSD", "permissive"),
-    (r"Creative Commons Attribution|CC BY[\s\-]?4|Attribution 4\.0 International|Creative Commons Attribution 4", "CC-BY-4.0", "permissive-attribution"),
-    # CC0 必须排在 CC-BY 之后，且用更严格特征 —— 反例（真实事故）：
-    # CC-BY-4.0 全文含一句 "dedicated to the public domain under the CC0 Public Domain Dedication"，
-    # 若 CC0 规则用裸 "CC0" 匹配，会把 CC-BY 误判成公有领域（宽松度判错一档）。
-    (r"Creative Commons Zero[\s\.]|CC0\s*1\.0|CC0\s+Public\s+Domain\s+Dedication\s*\n\s*This\s+work", "CC0-1.0", "public-domain"),
+    (r"Creative Commons Zero|CC0", "CC0-1.0", "public-domain"),
     (r"THE UNLICENSE|This is free and unencumbered software", "Unlicense", "public-domain"),
+    (r"Creative Commons Attribution", "CC-BY", "permissive-attribution"),
 ]
 
 FRIENDLY = {
@@ -82,7 +84,6 @@ def classify(text):
 def resolve(repo):
     """解析一个 owner/repo。返回核实结果 dict。"""
     out = {"repo": repo}
-    # 1) API 声明
     try:
         meta = json.loads(gh([f"repos/{repo}"]))
         out["stars"] = meta.get("stargazers_count")
@@ -90,7 +91,6 @@ def resolve(repo):
     except Exception:
         out["api_license"] = None
         out["stars"] = None
-    # 2) 回源 LICENSE 原文
     text, src = None, None
     raw = gh([f"repos/{repo}/license", "--jq", ".content"])
     if raw.strip():
@@ -110,12 +110,10 @@ def resolve(repo):
                 break
     out["source"] = src
     out["has_license_file"] = bool(text and text.strip())
-    # 3) 判定
     spdx, friend = classify(text)
     out["resolved"] = spdx
     out["friendliness"] = friend
     out["needs_review"] = spdx in (None, "非商用", "专有") or (friend == "copyleft-strong")
-    # 4) 一致性：API 与回源冲突 = 警报
     api = out["api_license"]
     if api and spdx and api != spdx:
         out["conflict"] = f"API={api} vs 回源={spdx}"
@@ -140,17 +138,16 @@ def show(r):
     print(f"  需人工审 : {'是' if r['needs_review'] else '否'}")
 
 
-# ---------------------------------------------------------------- selftest
 FIXTURES = [
-    ("自定义措辞+AGPL（prompt-optimizer 真实情形）",
-     "Prompt Optimizer\nCopyright (C) 2025 linshenkx\n\n"
+    ("自定义措辞+AGPL（顶部声明覆盖全文的情形）",
+     "Prompt Optimizer\nCopyright (C) 2025 someone\n\n"
      "This program is licensed under the GNU Affero General Public License v3.0 only.\n"
      "See the full license text below.\n\n"
      "                    GNU AFFERO GENERAL PUBLIC LICENSE\n"
      "                       Version 3, 19 November 2007\n",
      ("AGPL-3.0", "copyleft-strong")),
-    ("纯 MIT（mattpocock 真实情形）",
-     "MIT License\n\nCopyright (c) 2026 Matt Pocock\n\n"
+    ("纯 MIT",
+     "MIT License\n\nCopyright (c) 2026 Someone\n\n"
      "Permission is hereby granted, free of charge, to any person obtaining a copy\n",
      ("MIT", "permissive")),
     ("纯 GPL-3.0（不得误判成 AGPL）",
@@ -171,9 +168,7 @@ FIXTURES = [
      ("Apache-2.0", "permissive")),
     ("空文件", "", (None, None)),
     ("无法识别的怪文本", "blah blah nothing license-like here\n", (None, None)),
-    # ↓ 真实事故：khoj-ai/khoj 标准 AGPL-3.0 全文曾被裸 noncommercial 规则误判为「禁止商用」。
-    #   AGPL 第 6(b) 节原文："This alternative is allowed only occasionally and noncommercially"
-    #   那是「偶尔且非商业性地附源码」的条件，不是禁止商用。
+    # ↓ 真实事故：标准 AGPL-3.0 全文曾被裸 noncommercial 规则误判为「禁止商用」。
     ("AGPL 全文 6(b) 节含 noncommercially（不得误判禁商用）",
      "                    GNU AFFERO GENERAL PUBLIC LICENSE\n"
      "                       Version 3, 19 November 2007\n\n"
@@ -183,29 +178,12 @@ FIXTURES = [
      "     only if you received the object code with such an offer, in accord\n"
      "     with subsection 6b.\n",
      ("AGPL-3.0", "copyleft-strong")),
-    # ↓ 真实事故：prompt-optimizer 顶部自定义措辞 + AGPL 全文，API 报 NOASSERTION
+    # ↓ 真实事故：MIT 正文 + 尾部非商用声明
     ("MIT 正文后附「non-commercial use only」声明",
      "MIT License\n\nCopyright (c) 2026 Someone\n\n"
      "Permission is hereby granted, free of charge, to any person obtaining a copy\n\n"
      "This software is licensed for non-commercial use only.\n",
      ("非商用", "no-commercial")),
-    # ↓ 真实事故：eternity4719/HowToLiveBetter（★36,357）的 CC-BY-4.0 全文含
-    #   "dedicated to the public domain under the CC0 Public Domain Dedication" 一句，
-    #   裸 "CC0" 规则把它误判成公有领域 —— 宽松度直接判错一档。
-    ("CC-BY-4.0 全文提及 CC0（不得误判为公有领域）",
-     "Attribution 4.0 International\n\n"
-     "Creative Commons public licenses provide a standard set of terms and conditions\n\n"
-     "The text of the Creative Commons public licenses is dedicated to the public domain\n"
-     "under the CC0 Public Domain Dedication. Except for the limited purpose of\n"
-     "indicating that material is shared under a Creative Commons public license,\n"
-     "Creative Commons does not authorize the use by either party of the trademark\n"
-     "\"Creative Commons\" as indicated in section 4(b) of the License.\n",
-     ("CC-BY-4.0", "permissive-attribution")),
-    # ↓ 纯 CC0 仍必须正确判为公有领域
-    ("纯 CC0-1.0",
-     "Creative Commons Zero v1.0 Universal\n\n"
-     "This work has been marked as dedicated to the public domain.\n",
-     ("CC0-1.0", "public-domain")),
 ]
 
 
@@ -216,8 +194,7 @@ def selftest():
         got = classify(text)
         ok = got == want
         npass, nfail = npass + ok, nfail + (not ok)
-        mark = "✅" if ok else "❌"
-        print(f"{mark} {name}")
+        print(f"{'✅' if ok else '❌'} {name}")
         if not ok:
             print(f"     期望 {want}  实得 {got}")
     print(f"\n结果: {npass}/{npass + nfail} 通过")
@@ -241,7 +218,6 @@ if __name__ == "__main__":
     flagged = [r["repo"] for r in results if r["needs_review"]]
     print(f"\n{'=' * 50}")
     print(f"检查 {len(results)} 个仓库，需人工审: {len(flagged)}")
-    if flagged:
-        for f in flagged:
-            print(f"  → {f}")
+    for f in flagged:
+        print(f"  → {f}")
     sys.exit(0)

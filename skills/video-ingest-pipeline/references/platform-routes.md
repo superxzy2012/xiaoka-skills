@@ -61,9 +61,38 @@ for f in f_*.jpg; do ffmpeg -y -i "$f" -vf scale=480:-1 "s_${f}"; done
 ## dry-run 仍可用
 
 `ingest.py --dry-run` 会完整执行**下载 + 抽帧 + 转写**，只是不写库。
-末尾打印阶段可能抛 TypeError（结果项缺 title 时对 None 切片），
-但**这不代表转写失败**——读 stdout 前半段拿到转写全文即可。
-已修为 `(r.get('title') or '?')`；若再现仍按前半段取。
+已修为 `(r.get('title') or '?')`（原先对 None 切片抛 TypeError）；
+若旧版再现异常，读 stdout 前半段拿转写全文即可，**不代表转写失败**。
+
+`yt-dlp` 不在本机 PATH（`FileNotFoundError`）—— 直接调
+`transcribe.py <video> --json`，它是 ingest 内部用的同一个转写器。
+
+## 录屏类视频：OCR 拿不到项目名
+
+操作录屏（一边操作一边口播）的字幕是烧录在画面上的，字体极淡。
+480px 帧 OCR 只能取到零散词，裁剪放大到 1200px 反而更糊。
+
+**这类视频不要指望 OCR 锁定项目名**：把转写里的候选名当假设，
+逐个用 API 验证（仓库搜索 → contents → README），并在笔记里写明
+「无法从画面确认具体镜像」而不是猜一个。
+
+## 许可回源判定
+
+视频说「开源」不等于可用。**不要只看 GitHub API 的 `license.spdx_id`**：
+LICENSE 顶部加了自定义措辞会让 licensee 识别失败、返回 `NOASSERTION`，
+极易被读成「无许可证」。拉原文自行判定，并警惕反向误判——
+裸 `noncommercial` 会命中 AGPL-3.0 第 6(b) 节的
+「allowed only occasionally and noncommercially」，那是附源码的条件而非禁商用。
+
+判定逻辑见 `find-skills-xiaoka/scripts/resolve_license.py`（带 `--selftest`）。
+该脚本属用户所有技能，只作参考路径引用，不修改。
+
+## 视频索引类长文件的误报
+
+`姜胡说/00-姜胡说全部视频索引.md` 这类文件里密集出现 19-20 位数字
+（抖音作品 ID），用 `\d{17}[\dXx]` 当身份证正则会得到上千条误报。
+同理 `\d{11}` 手机号正则会命中 ID 后 10 位。**扫隐私信息时先确认数字来源**，
+再决定是真泄露还是 ID 误报。
 
 ## 帧必存 NAS
 

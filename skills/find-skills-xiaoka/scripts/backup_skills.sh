@@ -16,6 +16,13 @@ MSG="${1:-chore: sync $(date +%Y-%m-%d\ %H:%M)}"
 export HOME=/opt/data/home
 export GH_CONFIG_DIR=/opt/data/home/.config/gh
 
+# ⚠️ 凭据现状（2026-10-03，BOSS 决定暂不更换）
+#   当前使用 classic PAT（scope=public_repo），非 fine-grained。
+#   已知风险：PAT 曾粘贴进聊天记录；且 /opt/nas/.../.env 两处（权限 755）含该 token，
+#   NAS 上改不动（需 root），撤销 token 后残留自动失效。
+#   换法：github.com/settings/tokens 撤销 → 新建 fine-grained（只勾 xiaoka-skills,
+#   Contents: Read and write）→ bash scripts/setup_finegrained_token.sh
+
 echo "→ 1/4 脱敏暂存"
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 python3 <<'PY'
