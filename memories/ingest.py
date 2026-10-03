@@ -100,6 +100,56 @@ def safe_name(s, maxlen=60):
     return s[:maxlen].strip()
 
 
+def format_factcheck(r: dict) -> str:
+    """把 factcheck 结果渲染成 Markdown 段落，供追加到笔记正文。"""
+    L = ["", "## 🔍 自动核查（factcheck.py，回源 GitHub API）", ""]
+    L.append(f"> 核查时间：{datetime.date.today().isoformat()}　"
+             f"工具：`memories/factcheck.py`（自检 25/25）")
+    L.append("")
+    if not r["repos"]:
+        L.append("**⚠️ 未在正文中识别到 GitHub 仓库，无法自动核实。**")
+        L.append("")
+        L.append("需人工补上仓库名（形如 `owner/repo`）后重跑：")
+        L.append("```")
+        L.append("python3 /opt/data/memories/factcheck.py <本文件>")
+        L.append("```")
+        return "\n".join(L)
+
+    L.append("| 项目 | 实测值（GitHub API） |")
+    L.append("|---|---|")
+    for rp in r["repos"]:
+        f = r.get("_real", {}).get(rp, {})
+        if not f.get("ok"):
+            L.append(f"| `{rp}` | ❌ 查不到（{f.get('error','未知原因')}） |")
+            continue
+        lic = f.get("license_resolved") or f.get("license") or "无"
+        L.append(f"| `{rp}` | ★{f['stars']:,}　fork {f['forks']:,}　"
+                 f"许可 **{lic}**　创建 {f['created']}　push {f['pushed']}"
+                 f"{'　⚠️已归档' if f.get('archived') else ''} |")
+    if r["claims"]:
+        L += ["", "**视频声称的数字**：", ""]
+        for k, cl in r["claims"].items():
+            L.append(f"- {cl[2]}：`{cl[0]:g}`")
+    hard = [p for p in r["problems"]
+            if p.startswith("❌") or "冲突" in p or "归档" in p]
+    if hard:
+        L += ["", "**⚠️ 需关注**：", ""]
+        L += [f"- {p}" for p in hard]
+    else:
+        L += ["", "✅ 数字声称与实测一致，无异常。"]
+    return "\n".join(L)
+
+
+def guess_repos(text: str) -> list[str]:
+    """从笔记正文里找 GitHub 仓库（供核查用）。失败返回空列表，不报错。"""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import factcheck
+        return factcheck.extract_repos(text)
+    except Exception:
+        return []
+
+
 def build_note(vid, meta, transcript, frames, plat, url, keyword):
     d = datetime.date.today().isoformat()
     tag = {"douyin": "抖音", "bilibili": "B站"}[plat]
@@ -118,6 +168,7 @@ def build_note(vid, meta, transcript, frames, plat, url, keyword):
         f"date: {d}",
         f"tags: [提炼, {tag}" + (f", {keyword}]" if keyword else "]"),
         "added_by: 小卡",
+        "status: 待核查",
         "---",
         "",
         f"# {clean_title}",
@@ -171,6 +222,21 @@ def ingest_one(url, keyword="", keep_video=False, dry=False):
 
     name, content = build_note(vid, meta, transcript, frames, plat, url, keyword)
 
+    # ── 自动核查（2026-10-03 接入）：抽数字声称 + 回源 GitHub/许可证 ──
+    # 必须在写库前做，因为核查结果要写进笔记正文。
+    fc_result = None
+    if not dry:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import factcheck
+            probe = os.path.join(SCRATCH, vid + ".probe.md")
+            open(probe, "w", encoding="utf-8").write(content)
+            fc_result = factcheck.check_note(probe)
+            os.unlink(probe)
+        except Exception as e:
+            log(f"  ⚠️ 自动核查失败（不影响入库）: {e}")
+            fc_result = None
+
     if dry:
         log("  [dry-run] 不写库")
         return {"ok": True, "title": meta.get("title"), "note": content[:400],
@@ -184,6 +250,33 @@ def ingest_one(url, keyword="", keep_video=False, dry=False):
     dest = os.path.join(dest_dir, name + ".md")
     shutil.copy(tmp, dest)
     log(f"  ✅ 入库: {vdir}/{name}.md")
+
+    # 把核查结果追加进笔记（第二次写，覆盖第一次的无核查版本）
+    if fc_result:
+        extra = format_factcheck(fc_result)
+        if extra:
+            open(tmp, "a", encoding="utf-8").write("\n" + extra)
+            shutil.copy(tmp, dest)
+
+    # 核查结果已写入笔记正文（见下方 build_note 后的追加逻辑），此处只汇报
+    if fc_result:
+        hard = [p for p in fc_result["problems"]
+                if p.startswith("❌") or "冲突" in p or "归档" in p]
+        log("  🔍 自动核查:")
+        for rp in fc_result["repos"]:
+            f = fc_result.get("_real", {}).get(rp, {})
+            if f.get("ok"):
+                log(f"     · {rp}  ★{f['stars']:,}  许可={f['license_resolved'] or f['license'] or '无'}")
+        for cl in fc_result["claims"].values():
+            log(f"     · 视频声称 {cl[2]} = {cl[0]:g}")
+        for p in hard:
+            log(f"     ⚠️ {p}")
+        if not fc_result["repos"]:
+            log("     ℹ️ 未识别到 GitHub 仓库，笔记标为「待核查」，需人工补仓库名后重跑 factcheck.py")
+        elif hard:
+            log("     → 数字与实测不符，引用前以实测为准")
+        else:
+            log("     ✅ 数字与实测一致")
 
     # 附件
     if not dry and (keep_video or True):
