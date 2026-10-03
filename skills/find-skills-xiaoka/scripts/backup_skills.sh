@@ -47,6 +47,14 @@ for src,top in [("/opt/data/skills","skills"),("/opt/data/memories","memories")]
 print(f"   {n} 文件暂存, {s} 个脱敏")
 PY
 
+# README 与 .gitignore 由本脚本维护（rsync --delete 会删掉手工放的文件）
+cat > "$STAGE/.gitignore" <<'EOF'
+.DS_Store
+*.pyc
+__pycache__/
+EOF
+if [ ! -f "$STAGE/README.md" ]; then cp /opt/data/skills/find-skills-xiaoka/README.md "$STAGE/README.md" 2>/dev/null || true; fi
+
 echo "→ 2/4 校验无敏感信息残留"
 if grep -rlE '1[3-9][0-9]{9}|【城市区】|【大厦】|【BOSS姓名】|【BOSS英文名】' "$STAGE" 2>/dev/null | grep -q .; then
   echo "   ❌ 仍有敏感信息，中止"; exit 1
