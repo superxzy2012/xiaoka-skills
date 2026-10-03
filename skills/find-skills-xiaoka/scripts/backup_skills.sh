@@ -24,17 +24,22 @@ STAGE="/opt/data/cache/scratch/backup-stage"
 SKIP_DIRS={".git","__pycache__","node_modules",".cache",".venv",".venv-browser",".playwright-browsers"}
 SKIP_PARTS={"cookies"}                      # 登录态绝不上网
 SKIP_NAMES={"MEMORY.md","USER.md","USER_PROFILE.md"}   # 含个人信息
+# research 区只收笔记与配图：音视频体积大且可重新生成，不入库
+RESEARCH_EXT={".md",".png",".jpg",".jpeg",".webp",".gif",".json",".py",".txt"}
 RULES=[(re.compile(r'1[3-9]\d{9}'),'【手机号】'),
        (re.compile(r'【城市区】'),'【城市区】'),
        (re.compile(r'【大厦】'),'【大厦】'),
        (re.compile(r'【BOSS姓名】'),'【BOSS姓名】'),
        (re.compile(r'【BOSS英文名】|【BOSS英文名】'),'【BOSS英文名】')]
 n=s=0
-for src,top in [("/opt/data/skills","skills"),("/opt/data/memories","memories")]:
+for src,top in [("/opt/data/skills","skills"),("/opt/data/memories","memories"),
+                 ("/opt/nas/volume2/2-AI/obsidian_vault/15-小卡工作区/学习输出","research/学习输出"),
+                 ("/opt/nas/volume2/2-AI/obsidian_vault/08-抖音视频学习","research/抖音视频学习")]:
     for f in glob.glob(src+"/**/*",recursive=True):
         if not os.path.isfile(f): continue
         rel=os.path.relpath(f,src); parts=set(rel.split(os.sep))
         if (parts&SKIP_DIRS) or (parts&SKIP_PARTS) or os.path.basename(f) in SKIP_NAMES: continue
+        if top.startswith("research/") and os.path.splitext(f)[1].lower() not in RESEARCH_EXT: continue
         try: t=open(f,encoding="utf-8").read()
         except Exception: continue
         o=t
