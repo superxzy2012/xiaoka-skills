@@ -222,7 +222,7 @@ def main():
     log(f"完成 {ok}/{len(results)}")
     for r in results:
         if r.get("ok"):
-            log(f"  ✅ {r.get('title','?')[:40]} → {r.get('note')}")
+            log(f"  ✅ {(r.get('title') or '?')[:40]} → {r.get('note')}")
         else:
             log(f"  ❌ {r['url'][:50]} — {r.get('error')}")
     return 0 if ok == len(results) else 1
