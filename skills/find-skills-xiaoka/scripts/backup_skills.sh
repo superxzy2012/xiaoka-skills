@@ -37,7 +37,13 @@ RULES=[(re.compile(r'1[3-9]\d{9}'),'【手机号】'),
        (re.compile(r'【城市区】'),'【城市区】'),
        (re.compile(r'【大厦】'),'【大厦】'),
        (re.compile(r'【BOSS姓名】'),'【BOSS姓名】'),
-       (re.compile(r'【BOSS英文名】|【BOSS英文名】'),'【BOSS英文名】')]
+       (re.compile(r'【BOSS英文名】|【BOSS英文名】'),'【BOSS英文名】'),
+       # 机场订阅链接 —— 含可用 token，推公开仓等于送代理给别人
+       # 覆盖 query token / path token / VLESS URI 多种形态
+       (re.compile(r'(https?://[^\s"\'<>]*?(?:subscribe|clash|api/v1/client)[^\s"\'<>]*?token=)[^\s"\'<>&]+',re.I),r'\1【订阅TOKEN】'),
+       (re.compile(r'(token=)[A-Za-z0-9_\-]{16,}'),r'\1【订阅TOKEN】'),
+       # 常见代理协议 URI（vmess:// vless:// trojan:// ss:// 【代理URI】
+       (re.compile(r'\b(?:vmess|vless|trojan|ss|ssr|hysteria2?|hy2|tuic)://[^\s"\'<>]+',re.I),'【代理URI】')]
 n=s=0
 for src,top in [("/opt/data/skills","skills"),("/opt/data/memories","memories"),
                  ("/opt/nas/volume2/2-AI/obsidian_vault/15-小卡工作区/学习输出","research/学习输出"),

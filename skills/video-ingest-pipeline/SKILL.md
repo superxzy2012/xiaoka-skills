@@ -62,6 +62,32 @@ such links; or a task needs durable notes built from video content.
    the correct spelling. Confirm any identifier that will be cited with a live lookup.
    Fix the transcript's wording in the note and mark the corrections inline.
 
+## Skill-Bearing Videos: Install by Default
+
+BOSS (2026-10-04) 明确要求：**抖音链接里如果有 skill 或开源工具，默认安装，不要问。**
+
+After the normal transcript + frame-OCR pass:
+
+1. **Locate the repo from the OCR'd English README text** — paste the description you read off
+   the video frame into GitHub full-text search. Highest hit rate of any method; guessing
+   repo names 404s (four misses in a row on 2026-10-03).
+2. **Hard-verify every number** via the GitHub API and record mismatches in the note.
+   OCR digit reads are unreliable: a frame showing "★22.3k / 60 Fork" was actually
+   forks=1,417 / watchers=60 — OCR had merged two adjacent fields.
+3. **If the video carries a skill** (`SKILL.md`, an Agent Skill, `npx skills add`) → install it:
+   - **Run it once for real before claiming success** (build a fixture or run the official
+     example). Reading the README is not verification.
+   - MIT/Apache/BSD installs directly; **GPL/AGPL needs a heads-up** ("open source" on
+     a video ≠ commercial use).
+   - Skill `description` must be ≤60 chars or `skill_manage` rejects the create; put
+     detail in the body.
+   - Then set `status: 已核查` and `github_repo: owner/repo` in the note's frontmatter.
+4. **Only come back to ask** for destructive operations, money, or credentials.
+
+Same-org same-language siblings are the strongest decoys: `firecrawl/pdf-inspector` (★19,472,
+Rust, same org) matched on every heuristic but handles PDF only, while the correct answer was
+`firecrawl/anydoc` (★22,472). **Match the README description text, not star count or naming.**
+
 ## Pitfalls
 
 - **Take the video id from metadata, not the URL.** Share short links (e.g. `v.douyin.com/<code>/`)

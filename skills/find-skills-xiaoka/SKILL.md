@@ -52,6 +52,40 @@ curl -sL -o r.tar.gz https://codeload.github.com/<owner>/<repo>/tar.gz/refs/head
 
 搜 `site:docs.<project>.org` 或直接装包。**标准库的能用就别装第三方。**
 
+### 2.4 从短视频/画面定位开源项目（2026-10-03 实战）
+
+抖音只给中文口播、不给仓库名时的完整流程：
+
+1. **`ingest.py` 入库**（转写常漏掉画面上的仓库名）
+2. **`ffmpeg` 抽帧 → 降 480px 宽 → `rapidocr_onnxruntime` OCR**（720px×12 张会超 420 秒）
+3. **拿 OCR 读到的英文描述原文做 GitHub 全文检索** —— 这是命中率最高的一步。
+   实例：OCR 读到 `Convert Word, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV, and PDF to clean Markdown`，
+   直接当 `search/repositories?q=` 的 query 一次命中 `firecrawl/anydoc`。
+   比猜仓库名（猜了 4 个全 404）、比用中文关键词都强。
+4. **回源硬核实所有数字**，标注不吻合项
+
+**OCR 的数字不可信，坑实例**：视频画面显示「★22.3k / 60 Fork」，实测 forks=1,417、watchers=60 ——
+OCR 把 `1.4k` 和 `60` 读串了。**star/forks/watchers 三个字段必须分别取，不能凭画面位置对应。**
+
+**排除干扰项**：同组织同语言的兄弟仓库最像。`firecrawl/pdf-inspector`（★19,472，同为 Rust、同组织）看着完全对，
+但只做 PDF 不支持 Office —— 最终正确答案 `firecrawl/anydoc` ★22,472。
+**判定依据要比对 README 描述原文，不要只看 star 量级和命名模式。**
+
+**search API 的坑**：`gh api -X GET search/repositories -f q="..."` 里的中文/长 query 必须能被 GitHub 接受，
+返回空时先换英文原文再试；`-f` 不加 `-X GET` 会变 POST（`orgs/X/repos` 会报 403 admin access）。
+
+### 2.5 官方文档优先于猜 URL（2026-10-03 实战）
+
+**实例**：配mihomo 规则集时，我按记忆猜 `Loyalsoldier/geoip/release/text/cn-domain.mrs` —— 全404。查 mihomo 官方文档 `wiki.metacubex.one` 才找到真实地址（MetaCubeX 自己的 `meta-rules-dat/meta/geo/geosite/cn.mrs`）。
+
+**规矩**：任何「填一个 URL」的字段，先用官方文档或 repo contents API 确认路径存在，再写进配置。404 的正确反应是停下来查，不是换个域名再猜。
+
+**GitHub 搜索的两个坑**：
+- `MetaCubeX/mihomo` 在 GitHub 上是**同名撞车的非项目仓库**（星穹铁道数据，Python，★34,606）。真正的 mihomo 内核不在这个名字下。**搜到仓库名不等于找到项目，必须看 language + description 是否与预期一致。**
+- 中文 query 必须 URL 编码（`urllib.parse.quote`），否则 gh search 返回空而不报错。
+
+**现成方案可能不适用**：搜「clash 旁路由」出来的全是 OpenWrt 生态（passwall ★9,943 / homeproxy ★1,087），它们依赖 LuCI + OpenWrt 内核，在 UGOS/Debian 裸机上跑不了。**判断现成方案先看它依赖什么运行时，不能只看 star 数。**
+
 ## GitHub 已配好（2026-10-02 实测可用）
 
 ```bash
