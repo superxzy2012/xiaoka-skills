@@ -14,7 +14,7 @@ SITES = {
 }
 
 with sync_playwright() as p:
-    b = p.chromium.connect_over_cdp("http://192.168.199.184:9222")
+    b = p.chromium.connect_over_cdp("http://192.168.199.70:9222")
     ctxs = b.contexts
     print("contexts:", len(ctxs))
     ctx = ctxs[0]

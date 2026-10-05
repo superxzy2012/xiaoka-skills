@@ -27,7 +27,7 @@ def check_browser_hygiene():
     """BOSS 要求：同一网站最多开 2 个标签页，避免拖垮 CDP 桥接"""
     import json, urllib.request
     try:
-        with urllib.request.urlopen("http://192.168.199.184:9222/json/list", timeout=10) as r:
+        with urllib.request.urlopen("http://192.168.199.70:9222/json/list", timeout=10) as r:
             targets = json.loads(r.read().decode())
     except Exception as e:
         print(f"⚠️  浏览器标签检查失败（CDP 不可达）: {e}")

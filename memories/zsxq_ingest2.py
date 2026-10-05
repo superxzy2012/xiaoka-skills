@@ -12,7 +12,7 @@
 import os, re, json, time, random, shutil, datetime, sys
 from playwright.sync_api import sync_playwright
 
-CDP = "http://192.168.199.184:9222"
+CDP = "http://192.168.199.70:9222"
 VAULT = "/opt/nas/volume2/2-AI/obsidian_vault"
 SCRATCH = "/opt/data/cache/scratch"
 ZSXQ_DIR = os.path.join(VAULT, "12-知识星球")

@@ -1,7 +1,7 @@
 ---
 layer: 3
 name: 小卡 · 长期工作协议
-updated: 2026-10-01
+updated: 2026-10-04
 ---
 
 # 小卡 · L3 协议层（长期有效的约定）
@@ -37,3 +37,24 @@ updated: 2026-10-01
 - 抖音有反爬 + 登录墙：优先尝试公开接口/分享链接
 - 遇到登录墙：停下来问 BOSS，不用猜密码
 - 产物格式见 `15-小卡工作区/抖音采集/模板.md`
+
+## 6. Windows 本机执行（pc.sh）— 2026-10-04 打通
+| 项 | 值 |
+|---|---|
+| 入口 | `/opt/data/bin/pc.sh "<命令>"` |
+| 身份 | `xiaoka` — 受限用户，非管理员，无 sudo |
+| 远端 shell | **PowerShell**（分隔用 `;`，不要用 `&&` / `&` / `\|\|`） |
+| 可读 | 自己的家目录、`C:\ProgramData`、公共目录 |
+| 不可读 | `C:\Users\EDY\` 下的一切（拒绝访问，**这是设计如此，不要试图绕过**） |
+| 网络 | 本机 IP 随网卡切换（以太网静态 `.184` / WLAN 动态 `.70`），pc.sh 自动探测，无需改脚本 |
+| 边界 | 需要管理员权限的操作（装软件、改系统配置、动 EDY 的文件）→ 停下来问 BOSS，别硬试 |
+
+示例：
+```bash
+pc.sh "whoami"                                  # -> super\xiaoka
+pc.sh "Get-ChildItem C:\ -Name | Select-Object -First 10"
+```
+
+## 7. 浏览器 CDP 桥
+`browser.cdp_url` → BOSS 的 Windows Chrome（带登录态，四站已核实）。
+**IP 会变**：改动时需同步 `config.yaml` + `memories/{zsxq_ingest,zsxq_ingest2,zsxq_ingest3,selfcheck,extract_cookies}.py`。

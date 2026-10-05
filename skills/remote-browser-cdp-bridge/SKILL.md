@@ -27,8 +27,36 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 
 1. **Confirm the bridge is up before anything else.**
    `curl -s http://<host>:<port>/json/version` must return `webSocketDebuggerUrl`.
-   A local reverse proxy (plain TCP relay to `127.0.0.1:<port>`) is the usual shape when the
-   debug port binds to loopback only. If this fails, nothing below works — fix the bridge first.
+   If this fails, nothing below works — fix the bridge first.
+
+   Diagnose *before* touching the firewall, because the two failures look identical to the user:
+   - `Connection refused` → nothing is listening on that port. Add/fix the relay; a firewall
+     rule will not help.
+   - Connect succeeds but read hangs / times out → the port IS listening, something upstream is
+     dropping packets. Now a firewall rule is the fix.
+
+   When the debug port binds to loopback only, expose it with a userspace TCP relay rather than
+   asking the user to relaunch the browser with a different bind flag — current Chromium
+   releases ignore `--remote-debugging-address` and bind `127.0.0.1` regardless. See
+   `references/loopback-only-devtools-exposure.md` for the Windows relay recipe.
+
+   Verify the bind from the host, not from the browser's own machine. `curl http://127.0.0.1:PORT`
+   succeeding locally proves nothing about reachability — it is the loopback path working. The
+   only verdict that matters is the listener's `LocalAddress`: `127.0.0.1` means the port is
+   unreachable from anywhere else no matter what firewall rules exist, and `0.0.0.0` means the
+   relay chain is live. Check it and relay in one command, not in separate rounds:
+
+   ```powershell
+   Get-NetTCPConnection -LocalPort 9223 -State Listen | Select-Object LocalAddress
+   # 127.0.0.1 -> add the relay; 0.0.0.0 -> relay + firewall already in place
+   netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=9224 connectaddress=127.0.0.1 connectport=9223
+   New-NetFirewallRule -DisplayName CDP-fwd -Direction Inbound -Action Allow -Protocol TCP -LocalPort 9224 -Profile Any
+   ```
+
+   Don't re-try the bind flag with different quoting, launchers, or flags after the first
+   `127.0.0.1` verdict. It is a browser-version behaviour, not a syntax problem — the same
+   command through PowerShell's array form, `Start-Process -ArgumentList`, and `cmd /c start`
+   all produce loopback-only. Switch to the relay.
 
 2. **Connect with playwright, not the `browser` tool.**
    ```python
@@ -50,6 +78,11 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
    guest cookies. Call an endpoint that requires auth and read the status code
    (`{"code":401,"msg":"..."}` = guest). Pick any endpoint behind the login.
 
+   `document.cookie` is **not** a valid source for this verdict. Session cookies on major sites
+   are `HttpOnly`, so a fully logged-in browser reads back a plausible-looking short cookie
+   string with the session name missing — which reads as "not logged in". Use CDP
+   `Storage.getCookies` (see below) or playwright's `context.cookies()`, which include them.
+
 5. **Export cookies once, then work headlessly.**
    Write both formats: `context.cookies()` → JSON (replayable via playwright) and Netscape
    `.txt` (for yt-dlp/curl). Re-export whenever the user re-logs-in.
@@ -60,6 +93,26 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 
 ## Pitfalls
 
+- **`Storage.getCookies` rejects `browserContextId: null`.** Passing the parameter at all —
+  even as `None` — returns `-32602 Invalid parameters`. Send `{}` and filter by domain client-side.
+- **Guessing a cookie's *name* to decide auth produces a false negative.** Don't test for
+  `uid_tt`/`SESSDATA`/`sessionid` by memory — dump the actual names and match them against the
+  full `Storage.getCookies` list, and key off presence of a value plus the cookie count moving.
+  A site can rename these and a browser can be fully authenticated while every name you remember
+  is absent. A short cookie count that *grows* after the user logs in (e.g. 1030 → 4251 bytes) is
+  the real signal that login landed; the name check alone produced a wrong "not logged in".
+- **A config value pointing at a stale address is worse than no config.** An endpoint written
+  months ago for a DHCP-assigned IP looks correct and fails as `refused`/`no route`, which reads
+  as "bridge is down" rather than "address moved". Verify every configured host:port still
+  resolves before blaming the bridge, and re-derive it by probing the candidate addresses
+  directly. Back the file up before editing it.
+- **A short `document.cookie` is not evidence of logout.** `HttpOnly` session cookies are
+  invisible to JS by design; reading login state from JS produces a false negative on exactly
+  the sites you most need (video platforms, social). See step 4.
+- **Copying a browser profile does not copy a usable login state.** Cookies in a copied
+  `--user-data-dir` may be bound to the original install's encryption key, so the clone boots
+  logged out. Have the user sign in once *inside the dedicated automation profile*; that login
+  then persists across restarts. Do not loop on re-copying the profile.
 - **Guest vs real login**: a browser can hold dozens of cookies and still be a guest. Always probe an authed endpoint before promising a flow works.
 - **A stored "method X is blocked" conclusion goes stale on any browser restart.** Re-probe `Runtime.evaluate` / `Page.navigate` / in-page `fetch` on a fresh tab before telling the user a task needs their hands — refused navigation and dead API calls both get re-enabled by a restart or policy reload.
 - **Never invent ports or paths — scan and fingerprint.** A `200` on a guessed path is usually an SPA catch-all; read status *and* content-type together. The front-end bundle is the API map for panels that ship no docs. Confirm a port serves what you assume — a port you assumed was the vendor panel may be the user's own side project.
@@ -74,6 +127,11 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
   session is then reused over CDP without the secret ever entering the conversation.
 
 ## Depth
+- `references/loopback-only-devtools-exposure.md` — relaying a loopback-bound debug port to the
+  LAN (Windows `netsh portproxy` + firewall), and the bind-address check that proves it worked.
+- `scripts/cdp_client.py` — stdlib-plus-`websocket-client` CDP class: own-tab discipline,
+  id-matched request loop, `eval_js` / `cookies` / `cookie_header`. Import it instead of
+  hand-writing the request loop.
 - `references/location-and-auth-ceilings.md` — what client-side GPS overrides can and cannot fix, and how to prove a guest session.
 - `references/cookie-export.md` — dual-format export recipe (playwright JSON + Netscape for CLI tools).
 - `references/raw-cdp-and-target-recon.md` — raw CDP without playwright (own-tab discipline, `suppress_origin`, id-matching request loop), probing an unauthenticated vendor panel for real ports/API prefix, and packaging a handoff command.
