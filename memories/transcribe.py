@@ -48,11 +48,63 @@ def to_wav16k(src, dst="/opt/data/cache/scratch/_rt.wav"):
     return dst
 
 
+# 🔴 OpenRouter 单请求上限约 25MB（2026-10-05 实测：18MB mp3 转 41 分钟音频 → HTTP 413）。
+# 超过就按 SEG_SEC 切片逐段转写再拼接。留足余量用 20MB 阈值。
+MAX_UPLOAD = 20 * 1024 * 1024
+SEG_SEC = 600          # 每段 10 分钟（16k 单声道 ≈ 19MB，安全）
+
+
+def split_wav(wav):
+    """按 SEG_SEC 切片，返回 [(路径, 起始秒)]；无需切片时返回 [(wav, 0)]"""
+    size = os.path.getsize(wav)
+    if size <= MAX_UPLOAD:
+        return [(wav, 0)]
+    outdir = "/opt/data/cache/scratch/_segs"
+    os.makedirs(outdir, exist_ok=True)
+    for f in os.listdir(outdir):
+        os.remove(os.path.join(outdir, f))
+    dur = float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", wav],
+        capture_output=True, text=True, timeout=60).stdout.strip() or 0)
+    n = int(dur // SEG_SEC) + 1
+    segs = []
+    for i in range(n):
+        p = os.path.join(outdir, f"seg{i:03d}.wav")
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error",
+                        "-ss", str(i * SEG_SEC), "-t", str(SEG_SEC),
+                        "-i", wav, "-ar", "16000", "-ac", "1", p, "-y"],
+                       check=True, timeout=180)
+        if os.path.getsize(p) > 1024:      # 跳过空段
+            segs.append((p, i * SEG_SEC))
+    return segs
+
+
 def cloud(wav, model_key="turbo", lang="zh", retries=2):
     key = get_key()
     if not key:
         raise RuntimeError("拿不到 API key")
     model = CLOUD_MODELS[model_key]
+    # 超大文件先切片（否则 413）
+    segs = split_wav(wav)
+    if len(segs) > 1:
+        print(f"[info] 文件超 {MAX_UPLOAD//1024//1024}MB，切成 {len(segs)} 段逐段转写")
+    buf, cost_sum, parts_n = [], 0.0, 0
+    for seg_path, _ in segs:
+        txt, info = _cloud_one(seg_path, model, key, lang, retries)
+        buf.append(txt)
+        parts_n += 1
+        c = info.rsplit("$", 1)[-1] if "$" in info else "0"
+        try:
+            cost_sum += float(c)
+        except ValueError:
+            pass
+    joined = " ".join(t.strip() for t in buf if t.strip())
+    engine = f"cloud/{model_key}" + (f" x{parts_n}" if parts_n > 1 else "")
+    return joined, f"{engine} ${cost_sum:.6f}"
+
+
+def _cloud_one(wav, model, key, lang, retries):
     for attempt in range(1, retries + 1):
         try:
             # multipart/form-data 手写（避免依赖 requests）
@@ -81,7 +133,7 @@ def cloud(wav, model_key="turbo", lang="zh", retries=2):
             txt = (d.get("text") or "").strip()
             cost = (d.get("usage") or {}).get("cost", 0)
             if txt:
-                return txt, f"cloud/{model_key} {time.time()-t0:.1f}s ${cost}"
+                return txt, f"{time.time()-t0:.1f}s ${cost}"
             raise RuntimeError("云端返回空文本")
         except Exception as e:
             if attempt == retries:

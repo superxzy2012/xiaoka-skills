@@ -8,7 +8,8 @@ import os, re, sys, json, time, random, shutil, datetime, base64, socket, struct
 import urllib.request
 import urllib.parse
 
-CDP_HOST, CDP_PORT = "192.168.199.70", 9222
+CDP_HOST = os.environ.get("CDP_HOST", "192.168.199.184")
+CDP_PORT = int(os.environ.get("CDP_PORT", "9224"))
 VAULT = "/opt/nas/volume2/2-AI/obsidian_vault"
 SCRATCH = "/opt/data/cache/scratch"
 ZSXQ_DIR = os.path.join(VAULT, "12-知识星球")

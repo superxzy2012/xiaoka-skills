@@ -69,6 +69,11 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
 
 ## Where open_ids come from, in order of cost
 
+0. **Your own id and app name** — `GET /open-apis/bot/v3/info` with the same
+   `tenant_access_token`. Returns `{bot: {app_name, open_id}}` and needs **no extra
+   scope**, so it is the cheapest way to learn who *you* are in a chat you were just
+   mentioned in. Match `app_name` against the roster name before trusting the pairing —
+   a same-name bot on a different app is exactly the id-mismatch trap below.
 1. **Your own gateway log** — zero scopes, fastest:
    `grep "Inbound group message" <gateway.log> | tail -1` then read the `[Mentioned: ...]`
    prefix. Ids lifted from a real inbound message often resolve on the way out, **but still
@@ -99,6 +104,21 @@ id valid in one chat can silently fail to parse in another. This is the mechanis
   once, but never more than a session's worth.
 - **Log timestamps may not be local time** — compare timestamps against each other in the
   same log before concluding a reply is missing.
+- **The `[Mentioned: …]` head omits the receiving bot.** A message that plain-text-@s you
+  shows every *other* participant in the head and leaves you out, so a roster rebuilt from
+  the head looks one short and tempts you to "find the missing member". You are not missing —
+  resolve yourself via `/bot/v3/info` and stop hunting.
+- **Log lines truncate the mention list mid-id.** A head ending in a bare
+  `open_id=ou_abc…'` with no closing paren is width truncation, NOT an absent member; the
+  full id only exists in the raw event or in the `[Mentioned: …]` prefix your own session
+  context shows. Never count a truncated tail as "zero evidence".
+- **Repeating the same `open_id` in one message is not free.** Duplicate @s of one id
+  collapse visually but re-fire the event for each occurrence — de-duplicate before
+  broadcasting a roster, and say so when you find duplicates in someone else's.
+- **Do not reuse a foreign roster's chat/id tables.** Business-line bot fleets (the
+  Ozon / 美客多 / 亚马逊 groups documented in `feishu-13bots-tester`) are a different set of
+  apps from the ops/persona bots that talk in the management group; ids and group ids do not
+  cross over. Resolve the fleet you are actually in from live evidence.
 
 ## Honest reporting
 
@@ -113,3 +133,7 @@ Grade the claim by evidence, and say which half you have:
 - `references/api-response-shapes.md` — verbatim response bodies for the send / recall /
   chat-info / member-list calls, and how to read them.
 - `scripts/feishu_mention_probe.py` — runnable probe; its exit code is the gate signal.
+- `references/roster-resolution.md` — auditing an inbound @ roster: parse the mention head,
+  identify yourself, grade each id by evidence, de-duplicate, persist the result.
+- `scripts/feishu_roster_audit.py` — read-only parser over the local gateway logs; prints the
+  name→open_id table, sender counts, duplicate @s and truncation warnings.

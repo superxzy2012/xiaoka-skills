@@ -5,7 +5,8 @@
 """
 import sys, os, re, glob
 
-REPO = "/opt/data/cache/scratch/mzd/repo"
+# 语料放持久目录：scratch 空闲 24h 会被剪，剪掉后校验器会以 IndexError 崩掉而不是明确报错
+REPO = "/opt/data/cache/mzd/repo"
 VOLS = {"vol1": "001-第一卷*", "vol2": "002-第二卷*", "vol3": "003-第三卷*", "vol4": "004-第四卷*", "vol5": "005-第五卷*"}
 
 def core(s):
@@ -13,11 +14,17 @@ def core(s):
     return re.sub(r'[^\u4e00-\u9fff]', '', s)
 
 def load_corpus(vol):
-    d = glob.glob(f"{REPO}/{VOLS[vol]}")[0]
+    hits = glob.glob(f"{REPO}/{VOLS[vol]}")
+    if not hits:
+        sys.exit(f"FAIL: 语料缺失 {REPO}/{VOLS[vol]} —— 回源校验不能静默跳过，"
+                 f"先重新拉取（见技能 ground-truth-discipline「语料必须放在 scratch 之外」）")
+    d = hits[0]
     out = {}
     for f in glob.glob(f"{d}/**/*.md", recursive=True):
         key = re.sub(r'^\d+-', '', os.path.basename(f)[:-3])
         out[key] = open(f, encoding="utf-8").read()
+    if not out:
+        sys.exit(f"FAIL: 语料目录 {d} 下没有 .md 文件")
     return out
 
 def check_vol(vol, corpus):

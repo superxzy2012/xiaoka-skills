@@ -32,6 +32,27 @@ metadata:
 旧库写权限已验证 OK（`1000:uucp` 全权）。
 
 ## 音频转写（2026-10-01 建成并实测）
+
+### 🔴 云端转写三条硬约束（2026-10-05 实测补充）
+
+1. **选型：`whisper-large-v3-turbo`（`--model turbo`）是默认正解** —— 最便宜且准确率够用。
+   实测 41 分钟音频 = **$0.0082**（约 $0.0000033/秒），139 条 12 小时内容约 **$0.14**。
+   本地 `small` 免费但**错 3 字**（证→正、十一→亿、深证→深圳），专有名词不可用。
+2. **HTTP 413 Payload Too Large** —— OpenRouter 单请求上限约 25MB，长音频必炸。
+   `transcribe.py` 已内置切片（`MAX_UPLOAD=20MB` / `SEG_SEC=600`），超长自动分段转写再拼接，
+   日志显示 `cloud/turbo x5`。**新增长音频需求不需要自己写分段。**
+3. **不要用「转写字数 > 150」当成功判据** —— 1 分 19 秒的短视频转出来只有 79 字，
+   是完全正常的结果。阈值定 150 会把正常短片误判为失败。
+   用 **> 60 字**（实测 1 分钟以下的口播片约 50-80 字）。
+
+### 批量入库脚本（2026-10-05 新增）
+
+| 脚本 | 作用 |
+|---|---|
+| `memories/bili_mercado.py` | B站多关键词搜索 + 年份过滤 → 候选池 JSON |
+| `memories/mercado_batch.py` | 批量下载 → 字幕优先/turbo兜底 → 写 vault 笔记（断点续跑）|
+
+`mercado_batch.py` 判成功看**笔记文件是否落盘**（`*-{bvid}.md`），不看进程退出码。
 **路由器** = `/opt/data/memories/transcribe.py`（云端主力 + 本地兜底，自动降级）
 ```bash
 /opt/data/.venv-browser/bin/python /opt/data/memories/transcribe.py <音频> [--model auto|turbo|qwen|whisper1|local] [--json]

@@ -359,9 +359,153 @@
    "ts": "2026-10-04T11:05:22",
    "topic": "Skill生态",
    "recommended": true
+  },
+  "porlock-research/guardian-loop": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:05"
+  },
+  "sickn33/agentic-awesome-skills": {
+   "skip": "block",
+   "ts": "2026-10-05T09:38:06"
+  },
+  "mliu98/awesome-human-distillation": {
+   "skip": "block",
+   "ts": "2026-10-05T09:38:06"
+  },
+  "pillar-labs/sail-skill": {
+   "skip": "block",
+   "ts": "2026-10-05T09:38:06"
+  },
+  "Albertchamberlain/Awesome-OKF": {
+   "skip": "block",
+   "ts": "2026-10-05T09:38:06"
+  },
+  "sketch-hq/agents": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:06"
+  },
+  "ComPDFKit/docslight": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "CHEN010325/paddleocr-local": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "Nebutra/MinerU-Skill": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "p2r3/envelope": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "ComPDF-derek/docslight": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "Sqhao-O/dsh-docs": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "anyforge/anyparse": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "Gluxggg/OpenThesis": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:07"
+  },
+  "Alqemist-labs/agent_ferrum": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "crottolo/opencode-agent-browser": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "rickicode/patchright-browser": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "ulpi-io/browse": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "izzzzzi/agent-aget": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "alphaparkinc/genpark-agentic-web-scraping-anti-bot-bypasser-skill": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "alphaparkinc/genpark-self-driving-web-application-action-driver-skill": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:08"
+  },
+  "ikuaidev/ikuai-cli": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:10"
+  },
+  "templetongroup/radiant": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:10"
+  },
+  "zokrezyl/yetty": {
+   "skip": "low",
+   "ts": "2026-10-05T09:38:10"
+  },
+  "jo-inc/camofox-browser": {
+   "stars": 11430,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "爬取/数据获取",
+   "recommended": true
+  },
+  "OpenOSINT/OpenOSINT": {
+   "stars": 1690,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "效率工具",
+   "recommended": true
+  },
+  "limecloud/lime": {
+   "stars": 1482,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "效率工具",
+   "recommended": true
+  },
+  "ksimback/hermes-ecosystem": {
+   "stars": 1302,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "Skill生态",
+   "recommended": true
+  },
+  "risa-labs-inc/BossConsole": {
+   "stars": 809,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "效率工具",
+   "recommended": true
+  },
+  "amd/skills": {
+   "stars": 386,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "Skill生态",
+   "recommended": true
+  },
+  "ZeroDayEvil/ai-security-tool": {
+   "stars": 409,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "效率工具",
+   "recommended": true
+  },
+  "usewhale/Whale": {
+   "stars": 932,
+   "ts": "2026-10-05T09:38:10",
+   "topic": "效率工具",
+   "recommended": true
   }
  },
- "runs": 2,
- "last_run": "2026-10-04T11:05:22",
+ "runs": 3,
+ "last_run": "2026-10-05T09:38:10",
  "seen_ttl_days": 90
 }

@@ -80,10 +80,14 @@ def main():
         t = open(args.file, encoding="utf-8").read()
         if args.extract_from and args.extract_from in t:
             t = t.split(args.extract_from)[-1]
-        # 三种常见引文格式都吃
+        # 五种常见引文格式都吃
+        # 后两条必须行首锚定 `- `：只吃 bullet 引用清单，否则会把正文里
+        # 小卡自造的概括语（如「当下能赢几场」「表现—来源—纠正方法」）当引文误报。
         for pat in [r'^\d+\.\s*「([^\n]+?)」\s*(?:——)?\s*[—-]*\s*《([^\n]+?》)',
                     r'^>\s*「([^\n]+?)」',
-                    r'「([^\n]{8,}?)」\s*——《']:
+                    r'「([^\n]{8,}?)」\s*——《',
+                    r'^-\s*「([^\n]{8,}?)」（《([^》\n]+)》',
+                    r'^-\s*「([^\n]{8,}?)」——']:
             quotes += [(m.group(1), m.group(2) if m.lastindex and m.lastindex > 1 else "")
                        for m in re.finditer(pat, t, re.M)]
     elif args.quote:
