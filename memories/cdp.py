@@ -67,9 +67,16 @@ class CDP:
         return None
 
     # ---------- 标签管理 ----------
-    def new_tab(self, url="about:blank"):
-        """新建自己的标签，绝不碰 BOSS 现有标签。"""
-        r = self.call("Target.createTarget", {"url": url})
+    def new_tab(self, url="about:blank", background=True):
+        """新建自己的标签，绝不碰 BOSS 现有标签。
+
+        🔴 background=True 必须在 createTarget 时就传，不能事后补救——
+        否则 Chrome 会把新标签切到前台，抢走 BOSS 的焦点（2026-10-06 BOSS 明确要求）。
+        """
+        params = {"url": url}
+        if background:
+            params["background"] = True
+        r = self.call("Target.createTarget", params)
         if not r or "result" not in r:
             raise RuntimeError("createTarget failed: " + json.dumps(r, ensure_ascii=False)[:200])
         self._tid = r["result"]["targetId"]
@@ -79,8 +86,21 @@ class CDP:
         return self._tid
 
     def goto(self, url, wait=6):
+        """导航。🔴 每次导航前把标签压到后台，防止 BOSS 干活时被切走。"""
         self.call("Page.navigate", {"url": url}, self._sid)
         time.sleep(wait)
+
+    def send_to_back(self):
+        """把本标签激活到后台（若被 BOSS 点到前台，抢回来但不显示）。"""
+        try:
+            self.call("Page.bringToFront", {}, self._sid)
+            return True
+        except Exception:
+            return False
+
+    def activate_boss_tab(self):
+        """⚠️ 不要用——这会切到 BOSS 的标签。仅调试时用。"""
+        raise RuntimeError("禁止调用：会干扰 BOSS 前台")
 
     def close(self):
         try:
