@@ -98,3 +98,57 @@ LICENSE 顶部加了自定义措辞会让 licensee 识别失败、返回 `NOASSE
 
 `cache/scratch/` 24h 空闲会被清。抽帧、转写 JSON、校正脚本都搬进
 `15-小卡工作区/开源源码/<项目名>/关键帧/`，否则下次要重新下载一遍。
+
+## 批量重建缺失集：差集要用「已验证全集」
+
+账号主页滚动出来的 ID 列表**混着推荐流的他人作品**。拿它直接减 vault 已有集，
+会把别人的作品算成「我的丢了」，重建时又逐条被 `sec_uid` 剔除——白跑几十分钟。
+
+```python
+# ❌ 缺失池被推荐流污染，越修越大
+missing = all_scrolled_ids - have_in_vault
+
+# ✅ 只用验证通过、且 sec_uid 全等的集合做差集
+mine   = {a for a, m in verified.items() if m["sec"] == TARGET_SEC}
+missing = mine - have_in_vault
+```
+
+**主页列表 ≠ 该号作品集**，前者必须先过 `sec_uid` 全等过滤才是后者。
+反过来说：验证器把「早期那批 719xxx/7xxxx ID」全判为他人时，那是**验证器在正确工作**，
+不是列表错了——不要因此去调大过滤器。
+
+## 成功判据回查 vault，不信日志标记
+
+入库日志会把长 URL/标题截断，成功标记在 stdout 里被切开，grep 不到就记成失败，
+最后报「入库 0 / 失败 80」而笔记其实都在盘上。
+
+```python
+# ❌ 依赖 stdout 关键词
+if "✅ 入库" in stdout: ok += 1
+
+# ✅ 回 vault 按 douyin_id 复核，这才是事实
+for p in glob.glob(f"{DIR}/*.md"):
+    if f'douyin_id: "{aid}"' in open(p, encoding="utf-8", errors="ignore").read(400):
+        ok += 1; break
+```
+
+**通则**：长文本流程的计数一律**从最终产物反查**，不累加过程日志。
+汇报前交叉核对（总数 = 已存在 + 新增 + 他人剔除 + 真失败）；对不上就是判据错了，
+不是执行错了。「净损失」尤其危险——同时有误删和补进时，只看终态数量会得出
+比真实损失小得多的结论，重建前必须逐条算差集。
+
+## 删除笔记前先定死判据来源
+
+vault 里写入的内容（包括核查报告、可信度标注块）会**污染任何扫正文的判据**。
+实测正则里的「教育」命中了标注块里自己写的「教育线内容与本篇无关」，
+连带删掉 83 篇纯技术笔记。
+
+```python
+# ❌ 扫正文：判据会自我污染
+edu = re.search(r'教育|Day\d+', title + " " + full_text)
+
+# ✅ 只看文件名（文件名就是标题）/ frontmatter / 本轮 ID 差集
+edu = re.search(r'Day\s*\d+|青少年|AI素养', basename)
+```
+
+删除是不可逆的：**先跑 dry-run 打印待删清单并逐条核对，再真删**。

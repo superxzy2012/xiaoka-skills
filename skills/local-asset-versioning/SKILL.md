@@ -54,7 +54,62 @@ grep -rlE '1[3-9][0-9]{9}|<姓名>|<区>|<大厦>' "$STAGE" | grep -q . && { ech
 
 ### 4. push（含重试与假成功检测）
 
-## 双份仓策略
+## 单一共享目录 → 单一订阅的轮式同步（NAS 当发布节点）
+
+当任务形状是「本机把一个目录持续推到一个中心仓，其他机器各自 pull」时（NAS → GitHub 枢纽 → Mac），
+建立一条**轮式**同步链路：写入者只管推，订阅者只管拉。写入者永远不会替订阅者写文件。
+
+### 铁律：先拉后推，且冲突即中止
+
+```
+git fetch origin <branch> && git merge --no-edit origin/<branch>
+# 有未合并文件 → 立即 exit，绝不 push
+```
+
+「推之前先拉」不是为了好看，是为了不覆盖其他订阅者的提交。顺序反了就会静默吃掉别人的提交。
+冲突必须中止，不能靠强推绕过；真要重写远端历史，只能用 `--force-with-lease`（见上文）。
+
+### 工作副本放在本地盘，不在共享盘
+
+**git 操作不要在 NAS/网络共享盘的工作目录里跑**——checkout 写远程磁盘比本地 SSD 慢一到两个数量级。
+做法：把要发布的目录 `cp -a` 到本地盘（如 `/opt/data/sync/<repo>`）当工作副本，在那里 init/add/commit/push，
+推之前重新 `cp -a` 一遍把 NAS 上的最新成果覆盖进去。
+
+### 首次推送前必须报体积
+
+```
+git diff --cached --name-only -z | xargs -0 stat -c%s | awk '{s+=$1} END{printf "%.1f MB\n", s/1048576}'
+```
+
+把数字写进汇报。推一个 1GB 的仓会变成对方几十分钟的 clone，且 blob 进了历史就删不掉。
+
+### 私有仓 + SSH deploy key
+
+私有中心仓用 `ssh-keygen -t ed25519 -N '' -C '<node>@<host>' -f <path>` 单独一把 key，
+`chmod 600`。不要复用已有的登录 key（职责混在一起，且对方仓出错时会连累现有免密登录）。
+
+**交付公钥前必须回验，否则用户贴错了也看不出：**
+
+```bash
+grep -E '^ssh-ed25519' <pubkey-file> | ssh-keygen -lf -   # 文件里的行能不能解析
+ssh-keygen -lf <private-key>                              # 指纹是否一致
+```
+
+指纹一致再交付。用户把公钥贴到仓库 Settings → Deploy keys 时要**勾上 Allow write access**，
+并把这一句写进汇报——不勾就是只读，push 会报 403 而不是连接错误。
+
+### 判据：403 与「仓库不存在」不是一回事
+
+token scope 不足时 GitHub 会回 `remote: Write access to repository not granted.` + HTTP 403；
+仓库真不存在则是 `Repository not found.`。**这两个错误含义完全不同，猜错会白跑一天。**
+对照实验：拿一个肯定不存在的仓名跑同样的命令，看它回什么。推之前先区分清楚是哪个。
+
+### 先搜网段再报「连不上」
+
+要连某台机器做双写却连不上时，扫网段（22/445 等端口）确认它到底在不在，
+并对开着的口试多个用户名（`【BOSS英文名】`/`xiaoka`/`hermes`）。区分三种情况并在汇报里分开写：
+① 机器不在网段 → 只能靠对方 pull（写成兑底路径，不是失败）；② 在但拒绝公钥 → 需要授权；
+③ 在且能进 → 直接推。扫完整段只要 1–2 分钟（`xargs -P 60` 并发），比猜地址快得多。
 
 | 份 | 位置 | 内容 | 用途 |
 |---|---|---|---|
@@ -94,14 +149,16 @@ push 前用 `curl -s -o /dev/null -w '%{http_code}' -m 10 https://<网页域名>
 进程列表都可能泄露。改用 `git config credential.helper store` +
 `~/.git-credentials`（权限 600）。
 
-## Token scope 边界（决定能做到哪一步）
+## 令牌 scope 决定做不到哪一步（多一条：私有仓）
 
 | scope | 能力 | 不含 |
 |---|---|---|
-| `public_repo` | 读公开库、push 公开库、代码搜索 | **建私有库**（GraphQL 报无 CreateRepository 权限）、**删库**（403 需 delete_repo）|
+| `public_repo` | 读公开库、push 公开库、代码搜索 | **建私有库**（GraphQL 报无 CreateRepository 权限）、**删库**（403 需 delete_repo）、**读写他人私有仓**（403 Write access not granted） |
 
-所以公开仓 + 公开仓备份流程可以全自动，**建私有库和删测试仓必须请用户在网页操作**。
-不要为这些操作向用户索要更高权限 token。
+所以公开仓 + 公开仓备份流程可以全自动，**建私有库、给第三方节点开私有仓写权限、删测试仓
+必须请用户在网页操作**。不要为这些操作向用户索要更高权限 token——发一个需要
+`repo` scope 的提醒只会让用户以为你卡住了，而正确做法是**把公钥准备好 + 告诉他勾哪个选项**，
+让他用他本人的网页登录点两下。
 
 ## 收尾清单
 
@@ -113,3 +170,7 @@ push 前用 `curl -s -o /dev/null -w '%{http_code}' -m 10 https://<网页域名>
 
 占位符表、目录排除清单、远端二次校验命令、首次建仓顺序见
 `references/redaction-and-publish.md`。
+
+多节点轮式同步（NAS 当发布节点推、其他机器各自 pull）的完整脚本骨架见
+`templates/sync-subscribe.sh`——含先拉后推、冲突即中止、工作副本放本地盘、
+推送前报体积、deploy key 交付回验。改造时只需改顶部 6 个变量。

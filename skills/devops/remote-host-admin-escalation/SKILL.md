@@ -106,9 +106,50 @@ error, which is what makes them expensive:
   the far side — `ssh host "echo <b64> | base64 -d | bash"` — so `$`, backticks, and braces
   survive intact. Note the target shell may be POSIX `sh`: `def f() { …; }` is a syntax error
   there, so write loops, not function-declaration syntax.
+- **On PowerShell hosts, hand-escaped quoting collapses above ~one line.** SSH pre-parses in the
+  local shell first, so `\$var`, backticks, and `{ }` wrappers deliver a mangled body and you get
+  a parse error that reads like PowerShell is broken. Past a couple of lines, encode instead:
+  `ENC=$(iconv -f UTF-8 -t UTF-16LE script.ps1 | base64 -w0)` then
+  `ssh host "powershell -NoProfile -EncodedCommand $ENC"`. Four details decide whether it works:
+  the encoding must be **UTF-16LE** (UTF-8 makes PowerShell print its help text), `base64 -w0`
+  (no wrapping — newlines become extra argv), argv handles kilobytes fine so don't pre-truncate,
+  and remote output arrives **GBK-encoded with `<# CLIXML>` progress blocks**, so pipe through
+  `iconv -f GBK -t UTF-8 2>/dev/null | tr -d '\000\r'` before reading it.
+- **Do not use `powershell -File PATH` for a file that never crossed the wire.** `ssh` does not
+  forward your filesystem, so a local `.ps1` is simply absent remotely and the error reads as
+  "PowerShell can't find the file" — which sends you debugging the wrong layer.
+- **Keep a throwaway PowerShell wrapper around the encode-and-send dance** rather than
+  retyping it. `win_ps.sh /path/to/script.ps1` becomes the interface; every future remote probe
+  is just authoring a `.ps1` and calling the wrapper.
 
 Pass a secret as a positional argument to a temp script only when the host is one you already
 administer, and `rm` the script in the same command.
+
+## A denied probe is not an empty result
+
+On a restricted account the most expensive reasoning error is reading a permission denial as a
+factual "it doesn't exist":
+
+```bash
+wmic process get processid | grep -c "[0-9]"   # -> 0
+```
+
+That `0` may mean the query was **refused** (empty stdout), not that the machine has no
+processes. The same trap swallows `Get-NetTCPConnection`, `tasklist`, `Get-CimInstance`, and
+anything else gated on elevation.
+
+Two rules follow:
+
+- **Confirm a probe is capable of returning non-empty before interpreting its emptiness.** Pick a
+  signal that doesn't need the privilege (`netstat -ano` lists listeners for any user) and
+  cross-check with it. When one probe says "absent" and a privilege-free probe says "present",
+  trust the second.
+- **Report the epistemic state, not the assumed state.** The honest phrasing is "I lack
+  permission to see this", never "this isn't there." A denied probe redirected at a system
+  problem sends the whole repair at the wrong layer, and the user inherits a diagnosis they
+  can't act on.
+
+This matters most when the denied probe is the one that would have explained the actual outage.
 
 ## Do not install half a job and call it blocked
 

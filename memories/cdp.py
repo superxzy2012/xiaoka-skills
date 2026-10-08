@@ -113,6 +113,21 @@ class CDP:
         except Exception:
             pass
 
+    def close_tab(self):
+        """只关自己开的标签，保留 WebSocket 连接。
+
+        close() 会连 ws 一起关掉，脚本里想做「开标签→探活→关标签→再开」就会
+        把连接打断，后续 new_tab 报 socket is already closed（2026-10-07 踩过）。
+        """
+        if not self._tid:
+            return
+        try:
+            self.call("Target.closeTarget", {"targetId": self._tid})
+        except Exception:
+            pass
+        self._tid = None
+        self._sid = None
+
     # ---------- 高层 ----------
     def eval_js(self, expr, wait=0):
         if wait:

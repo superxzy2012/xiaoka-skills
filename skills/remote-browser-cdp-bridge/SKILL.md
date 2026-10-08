@@ -29,11 +29,21 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
    `curl -s http://<host>:<port>/json/version` must return `webSocketDebuggerUrl`.
    If this fails, nothing below works — fix the bridge first.
 
-   Diagnose *before* touching the firewall, because the two failures look identical to the user:
+   Diagnose *before* touching the firewall, because the failures look identical to the user:
    - `Connection refused` → nothing is listening on that port. Add/fix the relay; a firewall
      rule will not help.
+   - `Connection reset by peer` → a relay/portproxy rule is listening but has **no live CDP
+     service behind it** (the browser closed, or its debug port never came up). The relay is
+     not the problem; the browser process is. Confirm from the browser host that the backing port
+     actually has a listener — a rule pointing at a dead port is the signature.
    - Connect succeeds but read hangs / times out → the port IS listening, something upstream is
      dropping packets. Now a firewall rule is the fix.
+
+   Verify the backing listener from the browser host, not from your own side. Two hop-checks
+   tell you which of the two ends broke: your side (`curl` to the relay) and the browser host's
+   own `netstat -ano | findstr LISTENING` for *both* the relay and backing ports. If the relay
+   port is listening and the backing port is not, the browser needs restarting — no firewall or
+   relay edit will fix that.
 
    When the debug port binds to loopback only, expose it with a userspace TCP relay rather than
    asking the user to relaunch the browser with a different bind flag — current Chromium
@@ -114,12 +124,22 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
   logged out. Have the user sign in once *inside the dedicated automation profile*; that login
   then persists across restarts. Do not loop on re-copying the profile.
 - **Guest vs real login**: a browser can hold dozens of cookies and still be a guest. Always probe an authed endpoint before promising a flow works.
+- **When a page read comes back empty, escalate to a trivially-true probe before blaming your selector.** `document.title` and `location.href` returning `None`/empty while your careful DOM query also returns nothing means the **session is dead**, not that the selector is wrong. Chasing selectors against a dead session burns the whole loop — one navigation per item at 10s each turns a diagnosable outage into a silent all-items-failed batch. Probe once at script start and exit immediately with a clear message, so the failure costs seconds instead of the run.
+- **`AttributeError: module has no attribute 'goto'` is a wrong API call, not a dead bridge.** Read the helper's actual surface before using it — helpers usually expose methods on an instance (`CDP().goto(...)`), so a module-level `cdp.goto(...)` fails with an error that looks like a connectivity problem. Confirm with the same trivially-true probe: if `document.title` works, the bridge is fine and the bug is in your call. Tell these two apart early, because "the bridge is down" sends the user to reboot a browser that was healthy all along.
+- **Preflight the bridge before an expensive per-item loop.** A batch that navigates once per item should assert connectivity first and bail out in seconds if it fails. Otherwise a bridge outage spends the entire batch's wall-clock budget producing one uniform failure row per item, which reads as "the site rejected everything" rather than "nothing ever connected."
+- **Scope a metadata-repair sweep to the field that is actually broken.** A repair pass keyed on "author looks wrong" swept 47 notes, but only 8 had a numeric UID — the other 39 were hand-written notes with no author field at all. Match the exact broken shape (e.g. `author` is all digits), and fall back through every place the id can hide (frontmatter, then filename) before declaring a note unrepairable. Repair scripts must skip rather than guess: a note left untouched is recoverable, a note filled with a guess is not.
 - **A stored "method X is blocked" conclusion goes stale on any browser restart.** Re-probe `Runtime.evaluate` / `Page.navigate` / in-page `fetch` on a fresh tab before telling the user a task needs their hands — refused navigation and dead API calls both get re-enabled by a restart or policy reload.
 - **Never invent ports or paths — scan and fingerprint.** A `200` on a guessed path is usually an SPA catch-all; read status *and* content-type together. The front-end bundle is the API map for panels that ship no docs. Confirm a port serves what you assume — a port you assumed was the vendor panel may be the user's own side project.
 - **A panel that bounces to `#/login/…` loads its privileged routes only after auth.** The bundle you can fetch while logged out holds just the public API surface; absence of a container/service endpoint proves nothing about whether one exists. See `references/cross-host-admin-grants.md` for the boundary sweep and the one-step handoff.
 - **`location.hash` ending in `#/login/` is the verdict, not `localStorage`.** An `appKey` in storage is written before login finishes and reads like a live session.
 - **Key material handed to a user must come from the private key.** A `known_hosts` line is indistinguishable from a public key and pastes cleanly while authorizing nothing.
 - **`connect_over_cdp` `.pages` AttributeError**: pages are on `b.contexts[0]`, not the Browser.
+- **Never steal the user's foreground.** The browser being driven is their daily driver, so every
+  action has to be invisible to them: pass `background: true` when creating a target (the parameter
+  has to be present at `Target.createTarget` time — activating afterwards does not undo the
+  focus steal), never call `Page.bringToFront`, reuse one tab across a loop instead of opening one
+  per item, and close only the tabs you opened. Keeping a helper's `activate_*_tab()` method
+  raising unconditionally is a cheap way to make "just bring it up front" unrepresentable.
 - **Playwright browser install location**: if the download fails with EACCES on a dirlock, the
   env var `PLAYWRIGHT_BROWSERS_PATH` points at a root-owned dir — override it to a writable path.
 - **The bridge depends on the other host staying up.** State this as a constraint, not a bug.

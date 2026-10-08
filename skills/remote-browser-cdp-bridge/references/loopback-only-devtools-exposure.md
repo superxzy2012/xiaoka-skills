@@ -10,11 +10,76 @@ producing a loopback-only listener. Stop retrying launch flags and relay the por
 | Result of `Test-NetConnection`/socket connect from the client host | Meaning | Fix |
 |---|---|---|
 | `Connection refused` | nothing bound to that port | relay / relaunch — a firewall rule changes nothing |
+| `Connection reset by peer` | relay/portproxy is listening but **no CDP service behind it** — browser closed or debug port never came up | restart the browser; relay and firewall are fine |
 | connect OK, then read hangs or times out | port is listening, packets filtered | firewall allow rule |
 | connect OK and `/json/version` returns JSON | working | none |
 
 `Connection refused` is the one that wastes turns: it looks identical to "the app is down" and
 invites firewall edits that cannot possibly help.
+
+`Connection reset by peer` wastes turns differently: it reads like a working relay, so the
+instinct is to keep editing firewall/portproxy rules that are already correct. The signature is
+that the relay port answers while the **backing port has no listener at all** — prove that from
+the browser host with `netstat` (see below) and the fix is one browser restart, not a config edit.
+
+## Which side broke: two netstat rows settle it
+
+Check **both** ports from the browser host in one command:
+
+```cmd
+netstat -ano | findstr LISTENING | findstr /R /C:":9223 " /C:":9224 "
+```
+
+- relay port listening + backing port missing → the browser is down; relaunch it.
+- both listening, but the client gets reset → something is holding the backing port that is
+  not a browser (`OwningProcess` from the `Get-NetTCPConnection` form above identifies it).
+- both listening and the client still fails → the firewall rule is missing or scoped to another
+  profile; that is the only case a firewall edit fixes.
+
+Use **distinct** ports for the internal devtools port and the relayed LAN port specifically so
+this two-row comparison is possible at all.
+
+## Command availability on the browser host under a non-admin account
+
+Diagnosis often runs as an unprivileged automation user, where the obvious commands are denied.
+Know which fallbacks are real before spending turns on retries:
+
+| Command | Non-admin result | Use instead |
+|---|---|---|
+| `Get-NetTCPConnection` | `CimJobException: 无法连接到 CIM 类` | `netstat -ano \| findstr LISTENING` |
+| `Get-CimInstance` | PermissionDenied | `netstat -ano` |
+| `tasklist` / `tasklist /FI` | 「拒绝访问」, even for your own processes | the PID column of `netstat -ano` |
+| `netsh interface portproxy show all` | works — reads fine unprivileged | keep using it; it is the fastest read of the relay topology |
+| `whoami`, `hostname`, `$PSVersionTable` | works | — |
+
+So the reliable unprivileged sequence is: `netstat` for listeners and PIDs, `netsh ... portproxy
+show all` for the relay table, and escalate to `Get-NetTCPConnection` / `tasklist` only when the
+PID actually has to be resolved to a name.
+
+## Sending a multi-line script over ssh without quoting damage
+
+A command has to survive three parsers: the local shell, the remote Windows shell, then the
+PowerShell argument parser. Every hand-quoted variant breaks somewhere —
+`powershell -Command "..."` loses `$r.Content` to the local shell, `-File path.ps1` fails
+because ssh carries no file transfer, and stdin redirection lands in the wrong shell.
+
+Base64 the script as UTF-16LE and hand it to `-EncodedCommand`, which is pure base64 and needs
+no escaping at any layer:
+
+```bash
+ENC=$(iconv -f UTF-8 -t UTF-16LE script.ps1 | base64 -w0)
+ssh -i KEY user@host "powershell -NoProfile -EncodedCommand $ENC" | tr -d '\000'
+```
+
+`base64 -w0` matters — the default wrapping splits the argument. `tr -d '\000'` strips the NUL
+bytes that UTF-16LE introduces, which otherwise corrupt output containing non-ASCII text.
+Output may still be mojibake under a non-UTF-8 console code page; set
+`[Console]::OutputEncoding = [Text.Encoding]::UTF8` in the script when readability matters.
+Execution is unaffected by the code page.
+
+Keep remote diagnostics read-only and idempotent: probe → collect → print plain lines. Do not
+have a remote script install or reconfigure anything — that needs admin anyway, and a failed
+write leaves a messier remote host than the one you were sent to fix.
 
 ## Windows relay (verified shape)
 

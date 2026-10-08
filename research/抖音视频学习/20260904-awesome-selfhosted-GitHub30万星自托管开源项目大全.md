@@ -1,8 +1,11 @@
 ---
 title: awesome-selfhosted - GitHub 30万星自托管开源项目大全
 source: https://v.douyin.com/AvDJ02NaqT0/
+source_url: https://www.douyin.com/video/766008【手机号】50
+douyin_id: "766008【手机号】50"
+platform: douyin
 type: 抖音视频
-author: 35539489217
+author: "AIGC成也"
 duration: 约23秒
 stars: 1199
 tags: [抖音, 自托管, 开源项目, awesome-selfhosted, GitHub, 工具合集, 私有化部署]
@@ -12,7 +15,7 @@ confidence: A
 
 # awesome-selfhosted - GitHub 30万星自托管开源项目大全
 
-> 来源：抖音 @35539489217 | GitHub Stars: ~300k ⭐
+> 来源：抖音 @AIGC成也 | GitHub Stars: ~300k ⭐
 > 视频时长：约 23 秒 | 转写约 160 字
 
 ---

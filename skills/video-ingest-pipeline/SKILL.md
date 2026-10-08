@@ -90,6 +90,19 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
 
 ## Pitfalls
 
+- **Separate "the note is written" from "the metadata is right," and say which you have.**
+  The note landing on disk is the deliverable; a half-resolved `author` field or an unverified
+  number is not. When a follow-up repair is blocked, report the note as done *and* the repair as
+  outstanding in the same breath — don't let "ingested" imply "fully finished", and don't bury a
+  blocked step under a green summary.
+- **Hand back a decision the user can actually make.** When blocked on their machine, give the
+  specific command to run and say what each possible output means for the fix — "run X; if it
+  prints nothing, the browser isn't listening, if it prints a row, it's a firewall problem" — so
+  one reply closes the loop. Flagging an outage without a next step just moves the work back.
+- **Don't dress a failure as a workflow.** If every attempt at a task failed and it ended with
+  "please check manually", do not write those attempts into a skill as the recommended procedure.
+  Either find and verify a path that actually works, or record nothing and say plainly that the
+  approach is unproven.
 - **Take the video id from metadata, not the URL.** Share short links (e.g. `v.douyin.com/<code>/`)
   contain no `/video/<id>` segment; deriving the id from the string yields an empty or wrong value
   that then propagates into frontmatter and the attachment folder name.
@@ -106,6 +119,16 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
   that should hold the identifier makes it *worse* (blur, not resolution). For those, treat the
   transcript's candidate names as hypotheses and confirm each with a live lookup — never assert
   the tool in the notes from OCR alone.
+- **On douyin, `%(uploader)s` is the author's numeric UID, not their nickname.** The downloader
+  hands back `41506980594`, which lands in frontmatter as `author:` and reads as garbage to
+  anyone browsing the vault. Prefer the nickname the share text already carries (users paste
+  「【博主昵称的作品】」) and fall back to a CDP page read for the rest. Same class of bug as the
+  `douyin_id`-from-URL pitfall above: take identity from a source that actually has it.
+- **ASR errors in a project name propagate into `title:` and break findability forever.** A
+  23-second clip transcribed 「这个工具叫RE」 plus 「没有圆码」 and truncated the title to `Rea：…`,
+  so the note was unfindable by the tool's real name and its lead sentence was nonsense. After
+  resolving the repo, fix the name in the body *and* in frontmatter `title:` — a corrected
+  transcript under a wrong title still loses every search for the correct name.
 
 ## Depth
 - `references/platform-routes.md` — verified fetch route per platform, frame-OCR corrections, batch-OCR cost.
@@ -140,9 +163,36 @@ local skill and an upstream project can share a name and be entirely different t
 a Markdown workflow template, upstream a TypeScript web app). Say so in the note rather than
 letting the name collision imply coverage.
 
+**Record what the video omits, not just what it claims.** Promotional clips state the upside and
+drop the limit the maintainer puts in writing, and that omission is the most actionable thing the
+note can carry. Read the README for an explicit non-claim and the license for its real boundary,
+then put both in the note as their own lines: a reverse-engineering tool whose README says it
+does *not* recover original source code still reads as "shows me the original code" from the
+pitch; a permissive license on the tool does not grant any right to run it against someone
+else's closed-source product. `✅ 核实通过` on the video's claims and `⚠️ 视频漏说` on the
+maintainer's caveats belong in the same table, so a later reader sees the gap without opening
+the README.
+
 ## Archiving
 
 Frames, transcripts, OCR scripts, and pulled source all belong under
 `15-小卡工作区/<workspace>/开源源码/<project>/` — `cache/scratch/` is pruned after 24h idle,
 so anything left there will need re-downloading. Copy artifacts in, then fix the path references
 inside the note so they point at the permanent location.
+
+## Attachments live in a different tree than the notes
+
+Notes go to `<vault>/<platform-dir>/` (e.g. `08-抖音视频学习/`) but the ingest script writes
+frames to `<vault>/attachments/<platform>-<id>/` at the **vault root**. So one platform's frames
+are split across two trees, and the root `attachments/` accumulates every platform plus legacy
+material from earlier hand-made notes.
+
+**Consequence for anything that copies or syncs the vault: scope to the platform note directory,
+never to the vault-root `attachments/`.** The root tree holds hundreds of dirs and hundreds of MB
+of unrelated frames — sweeping it into a sync target or a publish batch inflated one repo from
+49MB to 989MB and would have made the peer's first clone a multi-GB download.
+
+Before the first push of any new sync target, print the staged byte total
+(`git diff --cached --name-only -z | xargs -0 stat -c%s | awk '{s+=$1} END{print s/1048576}'`)
+and state the number in the report. If it is orders of magnitude larger than the note text, the
+scope is wrong — find it before pushing, because git history keeps the blobs.
