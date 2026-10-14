@@ -107,6 +107,13 @@ curl -sSL -o mzd.tar.gz "https://codeload.github.com/NpTIme/MaoZeDongAnthology/t
 
 正确做法：`grep -l "<原句>"`，而不是 `grep -c`。
 
+**先确认你的 grep 能看见这些行。** 含非 ASCII 字符的路径会被列举类命令加双引号并转义
+（`"08-\346\212\226..."`），行尾是 `"` 而不是 `.md`——**任何 `$` 锚定的计数都会漏掉它们**。
+同一仓库实测：`git ls-files | grep -c '\.md$'` = 29，`git ls-files -z | tr '\0' '\n' | grep -cE '\.md$'` = 4980。
+
+规则：计数一律用 `-z` / NUL 分隔输出再逐行 grep；数字与预期差一个数量级时，**先怀疑输出格式
+（引号 / 转义 / 颜色码 / 分页），再怀疑数据**。
+
 ## 知识库体检（scripts/kb_audit.py）
 
 扫 Obsidian 全库 md，找机器可判定的问题。**不依赖外部语料**。

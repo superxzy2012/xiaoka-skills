@@ -25,9 +25,13 @@ identical from the sender's side ("I @'d them and nothing happened").
 
 ## Procedure
 
-1. **Pin the chat_id.** A DM chat_id and a group chat_id are different namespaces; sending to
-   the wrong one posts to the wrong place. `grep -oE "oc_[a-f0-9]{32}" <gateway.log> | sort | uniq -c | sort -rn`
-   shows which chat this bot actually talks in.
+1. **Pin the chat_id of the chat you are actually in — not the busiest one.** A DM chat_id and a
+   group chat_id are different namespaces; sending to the wrong one posts to the wrong place.
+   `grep -oE "oc_[a-f0-9]{32}" <gateway.log> | sort | uniq -c | sort -rn` ranks by *volume*, so
+   for a bot that talks to its owner more than in groups it returns the **home/DM** channel
+   first — the wrong target, and a send there still returns `code:0`. Take the id from the
+   inbound line that triggered this turn instead:
+   `grep "Inbound group message" <gateway.log> | tail -1` and read its `chat_id=`.
 2. **Get the target's open_id (see sources below).** Never hand-type one you "remember".
 3. **Send with a real mention tag**, `content.text` = `<at user_id="ou_xxx"></at> 正文`.
    Get a `tenant_access_token` first — `POST /open-apis/auth/v3/tenant_access_token/internal`
@@ -61,6 +65,7 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
 | Response | Meaning |
 |---|---|
 | `code:0` + `mentions` contains the open_id | ✅ real mention; receiver gets `im.message.receive_v1` |
+| …same, but `mentions[].name` is empty | ✅ still a real mention — `name` resolves blank for **bot** targets. Grade on the **id** only; the probe prints `mention ok ->  ou_…` with a gap and reads like a miss |
 | `code:0` + `mentions: []` | ❌ not a mention — open_id is from another app's view, or target is not in the chat |
 | `99991679` | user-identity token used on a message API → switch to `tenant_access_token` |
 | `99991672` on member list | missing `im:chat:readonly` — do **not** open a scope for this, use step-2 source 1 |
@@ -74,6 +79,8 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
    scope**, so it is the cheapest way to learn who *you* are in a chat you were just
    mentioned in. Match `app_name` against the roster name before trusting the pairing —
    a same-name bot on a different app is exactly the id-mismatch trap below.
+   `scripts/feishu_bot_whoami.py` is this call, with credentials read from the env file —
+   run it rather than hand-rolling a request (hand-rolled ones tend to inline the secret).
 1. **Your own gateway log** — zero scopes, fastest:
    `grep "Inbound group message" <gateway.log> | tail -1` then read the `[Mentioned: ...]`
    prefix. Ids lifted from a real inbound message often resolve on the way out, **but still
@@ -85,6 +92,29 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
 `open_id` is **app-scoped**: the same bot/user has a different id in every app's view, so an
 id valid in one chat can silently fail to parse in another. This is the mechanism behind most
 "the @ didn't take" reports — never assume an id is portable, always re-verify.
+
+Consequence for handshakes: a peer's authoritative copy of *your* id is the
+`sender=bot:ou_…` field of your message in **its own** inbound log — not the id you pasted as
+chat text, which is only guaranteed to resolve in the app that produced it. So when a
+handshake is done by posting ids, say which half you verified (yours parsed on the way out),
+and let the peer confirm it resolves on its side via its own `mentions[]`.
+
+## Reading a specific message back (no extra scope)
+
+`GET /open-apis/im/v1/messages/<message_id>` works with the app's ordinary message scope **for
+messages your bot actually received** — it returns the verbatim `body.content` (title, `post`
+runs, `mentions[]`, file name, timestamps). Use it when a peer claims it sent something and you
+need what it literally said, instead of arguing from your own truncated session text.
+
+Candidate ids live in the gateway's seen-message store — on this host
+`/opt/data/feishu_seen_message_ids.json`, shape `{"message_ids": {"om_...": <ts>}}`. Iterate
+them, print `msg_type` + body, and pull attachments with
+`GET /open-apis/im/v1/messages/<id>/resources/<file_key>?type=file`.
+
+- Do **not** switch to listing the chat (`?container_id_type=chat`) for this — that needs
+  `im:message.group_msg` (`230027`). The ids you already received are enough.
+- A file message only lands in the store if the upload **@-mentioned you**; a bare upload into
+  the group-files area never reaches the bot.
 
 ## Pitfalls
 
@@ -119,6 +149,12 @@ id valid in one chat can silently fail to parse in another. This is the mechanis
   Ozon / 美客多 / 亚马逊 groups documented in `feishu-13bots-tester`) are a different set of
   apps from the ops/persona bots that talk in the management group; ids and group ids do not
   cross over. Resolve the fleet you are actually in from live evidence.
+- **群文件 (group files) are not readable by the bot's app — route around them.** The chat
+  history pull needs `im:message.group_msg` (`230027`) and the drive endpoints need `drive:*`
+  (`99991672`); the web client keeps a file's token in app state rather than the DOM, so DOM
+  scraping gets you the file *name* and nothing else. When a peer says "the doc is in the group
+  files", don't burn the turn on extraction: ask for it as a message that **@-mentions you**
+  (then read it back with the section above), or take it from the shared Git hub.
 
 ## Honest reporting
 
@@ -133,6 +169,8 @@ Grade the claim by evidence, and say which half you have:
 - `references/api-response-shapes.md` — verbatim response bodies for the send / recall /
   chat-info / member-list calls, and how to read them.
 - `scripts/feishu_mention_probe.py` — runnable probe; its exit code is the gate signal.
+- `scripts/feishu_bot_whoami.py` — resolve your own `open_id` + `app_name` via `/bot/v3/info`
+  (no extra scope); run this before any bot-to-bot handshake.
 - `references/roster-resolution.md` — auditing an inbound @ roster: parse the mention head,
   identify yourself, grade each id by evidence, de-duplicate, persist the result.
 - `scripts/feishu_roster_audit.py` — read-only parser over the local gateway logs; prints the

@@ -52,6 +52,29 @@ fatal: fetch-pack: invalid index-pack output
 ```
 cron 和手动跑撞车就会中招，留下半截坏仓库。脚本已加 `flock`（exit 5 挡住）。
 
+## 从枢纽读别人交付的东西（只读，不动工作树）
+
+云端 / 其它节点的 agent 把交付物提交进这个仓库后，取件用 fetch + `git show`，**不要 checkout**：
+
+```bash
+cd /opt/data/sync/obsidian-sync
+GIT_SSH_COMMAND="ssh -i /opt/data/.ssh/obsidian-sync -o IdentitiesOnly=yes" git fetch origin
+git show <commit>:<path> > /tmp/out.md                  # 内容到手，工作树不动
+git log -1 --format='%H%n%an%n%ad%n%s' <commit>          # 谁、什么时候提交的
+```
+
+- **`gh api` 看不到这个私库**：`gh auth status` 显示已登录，但
+  `gh api repos/superxzy2012/obsidian-sync/...` 一律 404（token 对该私库无权限）。取件走 deploy key，
+  别在这上面绕。
+- fetch 回来的 commit **可能不挂在任何远程分支上**（`git branch -r --contains <sha>` 为空）——
+  只要能 `git show` 出内容就够用，不必为了「找到分支」继续折腾。
+- **数 md 篇数必须 `-z`**：中文/空格路径被 git 加引号转义，`grep -c '\.md$'` 会少算一个数量级。
+  同一仓库实测 `29` vs `4980`：
+
+```bash
+git ls-files -z | tr '\0' '\n' | grep -cE '\.md$'
+```
+
 ## 其它要点
 - 工作副本放 `/opt/data/sync/obsidian-sync`（本地 SSD），**绝不放 NAS 磁盘**——
   NAS 磁盘 checkout 极慢（2.3MB 要 180s）。
