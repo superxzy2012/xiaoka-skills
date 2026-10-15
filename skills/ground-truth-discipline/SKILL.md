@@ -114,6 +114,30 @@ curl -sSL -o mzd.tar.gz "https://codeload.github.com/NpTIme/MaoZeDongAnthology/t
 规则：计数一律用 `-z` / NUL 分隔输出再逐行 grep；数字与预期差一个数量级时，**先怀疑输出格式
 （引号 / 转义 / 颜色码 / 分页），再怀疑数据**。
 
+**同一条规则的部署版**：服务验收时 HTTP 200 只是「状态」，不是「内容」——
+端口上有别的服务在应答时，200 和你要部署的服务长得一模一样。
+判据必须是正文（`<title>`、产品名、健康检查 JSON 的字段），不是状态码。
+部署细则见 `nas-docker-deploy` 的「验收必须看响应正文」。
+
+## 归因也要回源（BOSS 说「你推荐/下载/配置的 X」时）
+
+多 agent / 多机器环境下 BOSS 会把来源记混。被问到「你推荐过的 X」时，
+**先 grep 自己的全部产出再回答** —— 既不要凭印象认领，也不要凭印象否认：
+
+```bash
+grep -rIl "<关键词>" /opt/data --include='*.md' --include='*.py' --include='*.json' --include='*.txt'
+grep -rIl "<关键词>" /opt/nas/volume2/2-AI          # vault / 共享技能库
+grep -rIl "<关键词>" /opt/data/cron/output /opt/data/profiles
+```
+
+- **日志里的命中不算证据**：`/opt/data/logs/agent.log`、`gateway.log` 会把 BOSS 的原话原样记进去，
+  按时间戳区分「我的输出」和「他的输入」。
+- 查不到就直说「我这边零命中」，并给**外部旁证**（安装时间、publisher、另一台机器/另一个 agent 的可能来源），
+  让 BOSS 自己判断，而不是替他认领或替他否认。
+- **描述第三方项目能力时只依据 README/源码，不依据项目名。**
+  名字像 X 不等于做 X —— 例如名字里带 agent 的项目可能是「多账号 → OpenAI 兼容网关」，
+  完全没有 agent 编排能力。报能力前先把 README 的功能表读出来转述。
+
 ## 知识库体检（scripts/kb_audit.py）
 
 扫 Obsidian 全库 md，找机器可判定的问题。**不依赖外部语料**。

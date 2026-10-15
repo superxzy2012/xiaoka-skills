@@ -84,8 +84,45 @@ services:
 $SSH DY@192.168.199.2 'cd /volume2/2-AI/<app> && sudo -n docker compose -f docker-compose.yml config --quiet && sudo -n docker compose -f docker-compose.yml up -d'
 $SSH DY@192.168.199.2 'sudo -n docker ps --filter name=<app> --format "{{.Names}}\t{{.Status}}\t{{.Ports}}"'   # 要看到 (healthy)
 $SSH DY@192.168.199.2 'sudo -n docker logs <app> 2>&1 | tail -25'
-curl -s http://192.168.199.2:<hostport>/<health-path>    # 从容器内也要能访问（证明 LAN 通）
+curl -s -o /dev/null -w "%{http_code}\n" http://192.168.199.2:<hostport>/   # 状态码
+curl -s http://192.168.199.2:<hostport>/ | head -c 200                       # 必须看正文
 ```
+
+### 🔴 验收必须看响应正文，不能只看 HTTP 状态码
+
+**200 只证明「这个端口上有东西在应答」，不证明「应答的是你刚部署的东西」。**
+实测：服务落到某端口后 curl 拿到 200 就报「通了」，实际应答的是早已占用该端口的另一个容器（qBittorrent WebUI）——
+两个服务都返回 200，只有正文能区分，于是把错端口写进了给 BOSS 的报告。
+
+判据（至少命中一个才算部署成功）：响应正文里的 `<title>`、产品名、或 `/api/health` 的 JSON 字段。
+
+### 🔴 读真实端口绑定用 docker inspect，不要读 docker ps 的 Ports 列
+
+`{{.Ports}}` 会把镜像 `EXPOSE` 的端口和实际绑定**并排**打印，例如：
+
+```
+3010/tcp, 0.0.0.0:30120->30120/tcp
+```
+
+极易被读成 `3010->3010`。真相只有这一条命令给：
+
+```bash
+$SSH DY@192.168.199.2 'sudo -n docker inspect <app> --format "{{json .HostConfig.PortBindings}}"'
+```
+
+### 🔴 docker 不会自动改端口
+
+绑到已占用端口会**直接失败**：`Bind for 0.0.0.0:3010 failed: port is already allocated`。
+所以「容器起来了、但端口和命令里写的不一样」只可能是当初那条命令就不是那个端口 ——
+**别归因成 daemon 自动重映射**，回去看 `.HostConfig.PortBindings` 再下结论。
+
+### 端口预检要查归属，不只是查占用
+
+```bash
+$SSH DY@192.168.199.2 'sudo -n docker ps --format "{{.Names}}|{{.Ports}}" | grep :<PORT>'   # 是谁占了
+```
+
+冲突时改一个空闲端口并在报告里写明**为什么改**，不要照抄规格里给的端口号。
 
 **规则**：镜像 tag 要 pin 具体版本，别用 `latest`（先查上游 release，取最新 tag）。
 
@@ -164,11 +201,97 @@ with open_cli_services(None) as svc:
 
 ### 5.2 另一例：cli2api（管理员 key 从启动日志取）
 
-`ghcr.io/caigee-cmd/cli2api:latest`，端口 3010，数据 `/volume2/2-AI/cli2api/data`（**不是**规格里给的 `/volume1/docker/...`）。
+`ghcr.io/caigee-cmd/cli2api:latest`，数据 `/volume2/2-AI/cli2api/data`（**不是**规格里给的 `/volume1/docker/...`）。
 
-- **管理员 key 是启动时自动生成、直接打进容器日志的**（`sudo -n docker logs cli2api | head`）→ 局域网内谁都能读到日志，交付时必须提醒 BOSS 首次登录就改掉。
+- **端口不能照抄规格里的 3010** —— NAS 上 3010 已被 **qBittorrent WebUI** 占用（`0.0.0.0:3010->8080`）。
+  实际部署落在 **30120**，控制台 `http://192.168.199.2:30120`（正文含 `<title>CLI2API</title>`）。
+  交付前必须用 `docker inspect --format '{{json .HostConfig.PortBindings}}'` 确认真实端口再写进报告。
+
+- 🔴 **管理员 key 只在「首次初始化」那一次启动时打印，之后重建容器就再也拿不到。** 用 `sudo -n docker logs cli2api` 只在**全新数据库**时才有效；容器一旦被 `docker rm -f` 后重跑，DB 已存在 → 新容器**只打印一行 `listening on ...`，没有 key**，去日志里找必然扑空。
+  可靠的取法是直接从 SQLite 取（复制副本读，**读完全局删除副本**）：
+  ```bash
+  $SSH DY@192.168.199.2 'sudo -n docker run --rm -v /volume2/2-AI/cli2api/data:/d alpine sh -c "cp /d/qoder.db /d/ro_copy.db && chmod 644 /d/ro_copy.db"'
+  python3 -c "import sqlite3;print(sqlite3.connect('/opt/nas/volume2/2-AI/cli2api/data/ro_copy.db').execute(\"select value from app_secrets where name='proxy_api_key'\").fetchone()[0])"
+  $SSH DY@192.168.199.2 'sudo -n docker run --rm -v /volume2/2-AI/cli2api/data:/d alpine rm -f /d/ro_copy.db'   # 必须删，副本含明文密钥
+  ```
+- **cli2api 没有「用户名 + 密码」** —— 控制台认证就是这一把管理员 key（单一 token，无账号名）。登录页填它即可；接口鉴权头是 `Authorization: Bearer <key>`（`/api/accounts`、`/api/keys`、`/api/models` 都可用它验活，返回 200 即有效）。
+- 该 key 明文躺在 `qoder.db` 的 `app_secrets.proxy_api_key`，且首启时进过容器日志 → 交付时提醒 BOSS 首次登录后轮换。
+- 全新部署的 `accounts` / `api_keys` 都是**空数组**，控制台登进去一片空白 —— 交付时要主动说明「还需添加账号、生成客户端 key」，别让 BOSS 以为装坏了。
 - **新容器一律加 `--memory <上限>`**：NAS 可用内存本就紧张（实测余 8G 左右，同时跑着 OmniRoute / Emby / MoviePilot 等），无上限的新容器可能把整机拖垮。
+
+### 5.3 又一例：n8n（2026-10-15 部署 + 打通 OmniRoute）
+
+`n8nio/n8n:2.43.5`，数据 `/volume2/2-AI/n8n/data` → 容器 `/home/node/.n8n`。
+
+- 🔴 **端口 5678 在 NAS 上已被 `g-box`（alist-tvbox，host 网络 + nginx）占用。**
+  它在 `docker ps` 的 `{{.Ports}}` 列里**根本不显示**（host 网络容器），只能靠宿主 netns 反查：
+  端口转十六进制（5678 → `162E`）→ 扫 `/proc/net/tcp{,6}` 拿 inode → 遍历 `/proc/*/fd` 找
+  `socket:[<inode>]` → 读 `cgroup` 得到容器 ID。实际部署落在 **5679**。
+- 🔴 **挂载目录必须 chown 1000:1000**：n8n 容器内以 uid 1000 跑，NAS 上 DY 建的目录是 1005，
+  否则启动即 `EACCES: permission denied, open '/home/node/.n8n/config'`。
+  ```bash
+  sudo -n docker run --rm -v /volume2/2-AI/n8n/data:/d alpine sh -c "chown -R 1000:1000 /d"
+  ```
+- 🔴 **`sudo -n` 只免密 `/usr/bin/docker`**，`sudo -n sh 脚本` 必被拒。拆成两半：文件用 DY 身份写，
+  docker 命令单独走 `sudo -n docker`。
+- 🔴 **不要在 512M 限制的容器里跑 `docker exec <c> n8n execute --id X`** —— 第二个 n8n 进程吃爆内存，
+  **主进程被一起拖死**（`RestartCount` +1，日志 `Last session crashed`）。手动执行一律走 REST API。
+- 🔴 **n8n 2.x 已移除 `N8N_BASIC_AUTH_*`**：设了**静默忽略，连 deprecation 警告都没有**。
+  真实机制是 owner 账号 —— `/rest/settings` 看 `userManagement.showSetupOnFirstLoad`，
+  然后 `POST /rest/owner/setup {"email","firstName","lastName","password"}` 建号（返回 200 即成功）。
+  SPA 外壳 HTML 本来就公开可访问（200 只证明编辑器页面在），真正的门是 `/rest/login`（未登录 401）。
+- `N8N_BASIC_AUTH_PASSWORD` 无 prompt、可当「口令载体」用：`docker exec <c> printenv N8N_BASIC_AUTH_PASSWORD`
+  取出来喂给建号/登录，口令不进聊天。
+- 弃用项：`WEBHOOK_URL` → `N8N_WEBHOOK_URL`（启动日志会列 deprecation）。
+- 密钥放 compose 同目录的 `.env`（600），compose 文件本身不含明文；再汇总一份到
+  `/volume2/2-AI/secrets/<app>-credentials.txt`（600，目录 700）。
+
+**手动跑 workflow 的正确契约（试了 5 种 body 才成）**：
+
+```
+POST /rest/workflows/{id}/run
+{"workflowData": <GET /rest/workflows/{id} 的 data 原样回传>,
+ "runData": {},
+ "triggerToStartFrom": {"name": "<触发节点名，如 Manual Trigger>"}}
+# -> {"data":{"executionId":"3"}}
+```
+- ❌ `startNodes`（任何形状）→ 400「specify either a trigger to start from or a destination node」
+- ❌ `destinationNode: null` → 400「Expected object, received null」；`destinationNode:{"name":..}` → 400「Required」
+- 认证：`POST /rest/login {"emailOrLdapLoginId":..., "password":...}` 拿 `n8n-auth` cookie（cookie jar）。
+- 读结果：`GET /rest/executions/{id}` 的 `data.data` 是**压缩格式**（JSON 数组 + 数字下标字符串引用），
+  必须自己 unflatten（字符串若是十进制数字且小于数组长度，就递归解析 `arr[int(s)]`）才能拿到节点真实返回。
+
+- 交付实例：容器 `n8n`（`n8nio/n8n:2.43.5`，`0.0.0.0:5679->5678`，`--memory 512m`，unless-stopped），
+  URL `http://192.168.199.2:5679`，owner `n8n-admin@xiaoka.local`，
+  workflow「OmniRoute连通性测试」= Manual Trigger → HTTP Request(POST OmniRoute `/v1/chat/completions`)，
+  实测返回 `n8n->OmniRoute 通了`。
 
 ## 六、汇报给 BOSS 时
 
-结论先行 + 表格：URL / 端口 / 数据目录 / 镜像 tag / 状态。凡涉及口令，只给**文件路径**，绝不把口令贴进聊天。
+结论先行 + 表格：URL / 端口 / 数据目录 / 镜像 tag / 状态。
+
+**口令的分寸**：报告里默认**只给文件路径 / 脱敏（前 4 后 4）**，不主动把口令铺进聊天。
+但 BOSS **明确点名要**某个属于他自己服务的凭据时，**直接给全值** —— 那是他的基础设施、他的私聊，
+端一句「请自己去读文件」只会让他多跑一趟。给的时候附上三件事：① 它的权限范围（控制台全权 / 仅 API）；
+② 它现在还暴露在哪些地方（明文文件、容器日志）；③ **建议轮换**。
+自己为了排查而复制出来的含密文件（DB 副本、导出文件），**用完立刻删**，不留明文残留。
+
+## 七、NAS 上「这个端口是什么服务」的取证
+
+BOSS 常直接甩一个 `192.168.199.2:<port>` 或一张截图问「这是什么？要账号密码吗」。
+按 1→4 顺序走完再回答，**不要靠端口号猜**（同一端口号在不同机器上完全可能是两回事）。
+
+1. **先排除容器**：`docker ps -a --format "{{.Names}}|{{.Image}}|{{.Ports}}" | grep :<PORT>`，命中即容器应用。
+2. **没命中 → 宿主进程 / host 网络容器**：在宿主网络命名空间里找监听者，再按 socket inode 反查 PID（端口先转十六进制，5005 → 138D）：
+   ```bash
+   $SSH 'sudo -n docker run --rm --privileged --pid host --net host alpine sh -c "
+     for f in /proc/net/tcp6 /proc/net/tcp; do awk \"\\\$2 ~ /:<HEX>\$/ {print \\\$2, \\\$10}\" \$f; done"'
+   ```
+   拿到 inode 后遍历 `/proc/*/fd` 找 `socket:[<inode>]`，读该进程的 `cmdline` 与 `cgroup`：
+   `cgroup` 是 `/../<name>.service` → 宿主 systemd 服务（NAS 自带功能多半如此）；是容器 ID → `docker inspect` 它。
+   （`netstat -tlnp` 在这类容器里看不到 PID，别指望它。）
+3. **读宿主配置与日志**（只读）：绿联自带服务在 `/ugreen/@appstore/com.ugreen.ctlmgr/<svc>/`、`/etc/<svc>/`、`/var/ugreen/log/`、`/var/lib/<svc>/`。
+4. **判「要不要账号密码」看配置，不看现象**：如 `/etc/webdav/webdav.conf` 的 `enable_anonymous=false` 才是强制认证的依据。
+
+完整命令序列、已核实实例（绿联内置 WebDAV 5005/5006）与「按 uid 分共享目录」的读法见
+`references/nas-service-forensics.md`。
