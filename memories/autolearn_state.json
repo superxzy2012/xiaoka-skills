@@ -715,9 +715,15 @@
    "ts": "2026-10-14T09:37:35",
    "topic": "Skill生态",
    "recommended": true
+  },
+  "skillmds/skillmd": {
+   "stars": 246,
+   "ts": "2026-10-15T09:37:37",
+   "topic": "Skill生态",
+   "recommended": true
   }
  },
- "runs": 9,
- "last_run": "2026-10-14T09:37:35",
+ "runs": 10,
+ "last_run": "2026-10-15T09:37:37",
  "seen_ttl_days": 90
 }
