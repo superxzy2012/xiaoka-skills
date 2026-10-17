@@ -101,13 +101,21 @@ git log -1 --format='%H%n%an%n%ad%n%s' <commit>          # 谁、什么时候提
 git ls-files -z | tr '\0' '\n' | grep -cE '\.md$'
 ```
 
+### 7. 「本地优先」会把远端降级（2026-10-16 实测事故）
+修正若只写进工作副本并推上远端、NAS 源文件还是旧版，次日 overlay 就会把**远端改回旧版**
+（实测丢了 `source_url/douyin_id/date/added_by` 四个字段 + factcheck 数字被换回模糊表述）。
+判断手法：`stat -c %y <NAS文件>` 的 mtime 早于远端那次提交时间 = 本地更旧。
+规则：**任何笔记修正必须落 NAS vault 源文件**，别只改工作副本。脚本已在 `git add` 后加
+「降级告警」：远端有、本地没有的 frontmatter 字段就打印 ⚠️（只告警不拦截，避免硬拦把每日任务搞死）。
+
 ## 其它要点
-- 🔴 **小卡对 vault 只有读权限，写不进去**（2026-10-15 实测）：`08-抖音视频学习/` 是
-  `drwxr-xr-x superxzy:admin`，hermes(uid 10000) 和 `ssh DY`(uid 1005) 都 `test -w` = no、
-  实际写入 `[Errno 13] Permission denied`。目录里 243 个 hermes 属主文件是**早期**写的。
-  结论：新笔记「落 NAS」这一步需要 BOSS 放开权限（把 hermes 加进属主组 / 给 ACL rwx / chmod 777）
-  或给一条免密写路径；在此之前 `ingest.py` 会在 `shutil.copy` 到 NAS 时失败。
+- vault 写权限现状（2026-10-16 实测）：hermes(uid 10000) 直写仍 `[Errno 13] Permission denied`；
+  但 **`ssh DY` 可以写** `08-抖音视频学习/`（`touch` 实测 OK，目录属主已是 1005 DY）。
+  写 NAS 文件的可用路径：`base64 -w0 本地文件 | ssh -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2
+  "printf '%s' '<b64>' | base64 -d > '/volume2/2-AI/...'"`。
+  本容器**没有 sudo**（`/usr/bin/sudo` 不存在），别照抄旧记录里的 `sudo -n docker run`。
   排查手法：`test -w <dir>` 只能看模式位，**真写一次**才算数。
+- 旧记录：目录里 243 个 hermes 属主文件是**早期**写的（当时权限不同）。
 - 工作副本放 `/opt/data/sync/obsidian-sync`（本地 SSD），**绝不放 NAS 磁盘**——
   NAS 磁盘 checkout 极慢（2.3MB 要 180s）。
 - 大二进制（`*.mp4` 等）vault 的 `.gitignore` 已排除，但 **PNG 帧图会进 git**。

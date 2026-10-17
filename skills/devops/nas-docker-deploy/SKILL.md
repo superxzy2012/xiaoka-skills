@@ -34,7 +34,7 @@ $SSH 'sudo -n docker ps'
 - 改宿主文件（/etc、/var/spool/cron 等）：`sudo -n docker run --rm -v /etc:/etc alpine sh -c '...'`。
 - 路径映射：容器内 `/opt/nas/volume2` = 宿主 `/volume2`。宿主 crontab 在 `/etc/cron.d/`、`/var/spool/cron/crontabs/root`。
 
-## 二、两个必踩的坑
+## 二、必踩的坑
 
 1. **scp / sftp 不可用** —— `scp` 报 `dest open ... No such file or directory`（SFTP 子系统被限），但目标目录其实存在。
    传文件改用 base64 管道：
@@ -49,6 +49,12 @@ $SSH 'sudo -n docker ps'
    $SSH DY@192.168.199.2 'sudo -n docker images --format "{{.Repository}}:{{.Tag}}" | grep <name>'
    ```
 
+4. **`docker run -v <宿主路径>:<挂载点>` 之后，容器内只能用挂载点。**
+   在容器里写 `/volume2/2-AI/...`（宿主路径）**不会报任何错** —— alpine 把它当容器内的普通路径，
+   `mkdir`/`cp` 全部成功，`ls` 也列得出来，但文件落在**容器的可写层**，`--rm` 一退就消失了。
+   判据只有一条：**退出容器后从宿主侧回读**（`ls` / `md5sum` 比对）。
+   这个坑在「用 root 容器绕开权限写文件」时最容易踩 —— 容器内一切看起来都正常。
+
 ## 三、部署前预检
 
 ```bash
@@ -58,7 +64,20 @@ $SSH DY@192.168.199.2 'sudo -n docker info | grep -E "Docker Root Dir|Registry M
 $SSH DY@192.168.199.2 'df -h /volume2 | tail -1'
 ```
 
-镜像源：NAS 配的 mirror（xuanyuan / daocloud / 1panel）**只覆盖 docker.io**。ghcr.io 直连可用且不慢（678MB 镜像 76s）。国内镜像仓备选 `ghcr.nju.edu.cn/<org>/<repo>:<tag>`。
+镜像源：NAS 配的 mirror（xuanyuan / daocloud / 1panel）**只覆盖 docker.io**。ghcr.io 直连**多数时候**可用且不慢（678MB 镜像 76s），但会「假死」——见下方 §5.5。国内镜像仓备选 `ghcr.nju.edu.cn/<org>/<repo>:<tag>`。
+
+### 🔴 拉取「假死」的判据与处置
+
+症状：日志里所有 layer 都打了 `Download complete`，然后**再无一行输出**；干等 5 分钟行数不动。
+**判据**：`ps -o pid,etime,time,stat,%cpu -p <pull-pid>` 看 `TIME` 是不是 `00:00:00` + `%CPU` 为 0 —— 是就说明进程在空转，不是磁盘慢、不是解压慢，等多久都不会好。
+**处置**：杀掉重拉（`kill` 需要 root，用特权容器借宿主 PID 命名空间）：
+
+```bash
+$SSH DY@192.168.199.2 'sudo -n docker run --rm --privileged --pid host --net host alpine sh -c "kill -9 <pid>"'
+$SSH DY@192.168.199.2 'nohup sudo -n docker pull ghcr.nju.edu.cn/<org>/<repo>:<tag> > /tmp/pull2.log 2>&1 &'
+```
+
+换镜像源后几十秒即落地。**别原地重试同一个源** —— 同一个源同一时刻会以同样方式再卡一次。
 
 ## 四、compose 模板
 
@@ -265,6 +284,126 @@ POST /rest/workflows/{id}/run
   URL `http://192.168.199.2:5679`，owner `n8n-admin@xiaoka.local`，
   workflow「OmniRoute连通性测试」= Manual Trigger → HTTP Request(POST OmniRoute `/v1/chat/completions`)，
   实测返回 `n8n->OmniRoute 通了`。
+
+### 5.4 不回源核实就采信 n8n 交付物：直接查 SQLite
+
+对端/自己汇报「workflow `VEdD6...` 已激活 + credential `NdDN...` 已建」时，**不要靠 REST API 登录验**
+（登录会碰到 rate limit，实测 `/rest/login` 直接 429），直接读 DB —— 只读、不需要口令：
+
+```bash
+$SSH DY@192.168.199.2 'python3 -c "
+import sqlite3
+c=sqlite3.connect(\"/volume2/2-AI/n8n/data/database.sqlite\")
+print(\"workflows:\")
+for r in c.execute(\"select id,name,active from workflow_entity\"): print(\" \",r)
+print(\"credentials:\")
+for r in c.execute(\"select id,name,type from credentials_entity\"): print(\" \",r)
+"'
+```
+
+- `active` 列 1/0 就是 workflow 是否真激活 —— 比任何汇报都硬。
+- `credentials_entity` 只给 id/name/type，**不含密钥明文**，可安全引用。
+- 该 DB 是 WAL 模式（有 `-wal` / `-shm` 伴随文件），**只读连接安全**；但别在 n8n 运行时写它。
+- DB 属主是容器内 uid（`superxzy`），DY 读得到，无需 sudo。
+
+### 5.5 又一例：FreeLLMAPI（2026-10-16 部署）
+
+上游 `tashfeenahmed/freellmapi`（MIT，★36k，自托管「免费 LLM 路由器」：把多家免费额度的平台拧成一个 OpenAI 兼容端点）。
+
+- 端口：镜像内 **3001**；NAS 上 3001/3002 已被 **moviepilot-v2** 占用 → 宿主落 **3003**（`0.0.0.0:3003:3001`）。
+- 数据 `/volume2/2-AI/freellmapi/data` → 容器 `/app/server/data`；`mem_limit: 768m`。
+- 必填 env：`ENCRYPTION_KEY`（32 字节 hex，`python3 -c "import secrets;print(secrets.token_hex(32))"`），写同目录 `.env`（600），compose 用 `env_file` 引。
+- 健康检查走 `/api/ping` → `{"status":"ok","timestamp":...}`。
+- 🔴 **首装设置码只在首次启动日志里**（`First-run setup code: XXXXXXXXXX`）——同机浏览器可免码进，**异设备必须输码**才能建第一个账号。这等于管理员入口：交付给 BOSS 时要一并说明「建完账号即失效」。
+- 镜像 tag 上游只发 `latest`（无版本号），照实写并在报告里注明。
+- 交付实例：容器 `freellmapi`，`ghcr.nju.edu.cn/tashfeenahmed/freellmapi:latest`，`0.0.0.0:3003->3001`，healthy，URL `http://192.168.199.2:3003`。
+
+**5.5.1 首次初始化（2026-10-16 已实操走通）**
+
+初始化完成的可执行判据（不要靠页面观感）：
+
+```bash
+$SSH 'curl -s http://127.0.0.1:3003/api/auth/status'   # 期望 {"needsSetup":false,...}
+```
+
+- 建号接口 `POST /api/auth/setup {email,password}`。**局域网调用要一次性设置码，环回 127.0.0.1 免码**；
+  前端是**先提交一次拿 403，页面才显示设置码输入框**（所以「页面上找不到码框」不等于不支持）。
+  桌面版免密登录靠 `FREEAPI_DESKTOP=1`，Docker 部署没有 → 只能走邮箱+密码。
+- 🔴 **统一 API key 不在 `api_keys` 表，在 `settings.unified_api_key`**（59 字符）。
+  用容器内 node 读出来写文件，**只打印前缀不回显全值**：
+  ```bash
+  base64 -w0 key_out.js | $SSH 'base64 -d > /tmp/key_out.js'
+  $SSH 'sudo -n docker cp /tmp/key_out.js freellmapi:/tmp/key_out.js >/dev/null && \
+        sudo -n docker exec -w /app -e NODE_PATH=/app/node_modules freellmapi node /tmp/key_out.js'
+  ```
+- 🔴 **容器内跑 node 脚本必须带 `-w /app` + `-e NODE_PATH=/app/node_modules`**，否则 `better-sqlite3` 解析不到 → 输出重复/报错，看着像脚本写错。
+- 🔴 **`data/` 是 700、容器内 root 属主** → DY 在宿主侧 `cat` 报 Permission denied。
+  把 key 拷到 DY 可读处要借 root 容器：
+  ```bash
+  $SSH 'sudo -n docker run --rm -v /volume2/2-AI/freellmapi:/w alpine sh -c "cp /w/data/UNIFIED_KEY.txt /w/UNIFIED_KEY.txt && chmod 600 /w/UNIFIED_KEY.txt && chown 1005:100 /w/UNIFIED_KEY.txt"'
+  ```
+- 🔴 **FreeLLMAPI 不是「零配置白嫖」网关，是「免费额度聚合器」。** 首装后调 `/v1/models` 会列出 259 个模型，
+  但**全部 `available:false`、`unavailable_reason:"no_key"`** —— 每个平台都要你自己去它的免费档注册领 key，
+  在面板 Keys 页粘贴（`dist/lib/key-parser.js` 按格式自动识别平台）。上游 key 数为 0 时直接调会 503。
+  目录口径（`settings.catalog_applied_json`，version 2026.10.16）：**38 平台 / 377 模型**，有模型行的 32 个：
+  electronhub(65) · aihorde(32) · cloudflare(26) · airforce(20) · nvidia(18) · cohere(17) · google(15) ·
+  kilo(13) · ovh(13) · mistral(12) · openrouter(12) · modelscope(11) · waterfall(10) · dreamprompting(9) ·
+  xkiro(9) · requesty(8) · groq(7) · router9(6) · ollama(6) · agnes(5) · sealion(5) · septor(5) · aion(4) ·
+  clod(4) · bazaarlink(3) · llm7(3) · routeway(3) · zhipu(3) · nara(2) · radeon(2) · unorouter(2) · logfare(2)。
+  交付时必须明说这一步，否则 BOSS 会以为装坏了。
+
+### 5.6 又一例：cdp-chrome（2026-10-16 部署，T-012）
+
+NAS 容器内自建 headless Chromium，给抖音/B站解析提供 CDP，**摆脱对局域网电脑的依赖**。
+
+- 镜像 `zenika/alpine-chrome:latest`（Chromium 124，容器内用户 `chrome` uid 1000）。
+- 🔴 **NAS 直连外网是「选择性」的**：`www.example.com` 通、`registry-1.docker.io` 超时（exit 124）。
+  别因为一个域名通了就认定网络没问题。国内镜像源实测：**`docker.1ms.run` 可用**、`hub.rat.dev` 可用；
+  `docker.m.daocloud.io` 拉 `alpine` 可以但拉 `zenika/alpine-chrome` 失败；`docker.nju.edu.cn` denied。
+  拉完 `docker tag docker.1ms.run/zenika/alpine-chrome:latest zenika/alpine-chrome:latest` 还原名字。
+- 🔴 **端口必须绑 LAN IP，不要绑 0.0.0.0**：`-p 192.168.199.2:9222:9222`。
+  （工单示例里写 `--remote-debugging-address=0.0.0.0` 是**容器内**监听地址，与宿主 `-p` 绑定是两件事；
+  容器内必须 0.0.0.0 才能被 `-p` 转发，宿主侧只绑 LAN IP 即满足「禁暴露公网」。）
+- 🔴 **`--user-data-dir=/data` 的挂载目录必须 `chown 1000:1000`**，否则 Chromium 起不来。
+- 启动命令：
+  ```bash
+  sudo -n docker run -d --name cdp-chrome --shm-size=1g --memory=1g --restart unless-stopped \
+    -p 192.168.199.2:9222:9222 -v /volume2/2-AI/cdp-profile:/data \
+    zenika/alpine-chrome:latest --no-sandbox --remote-debugging-address=0.0.0.0 \
+    --remote-debugging-port=9222 --user-data-dir=/data --disable-blink-features=AutomationControlled
+  ```
+- 验收：`curl -s http://192.168.199.2:9222/json/version` → `HeadlessChrome/124...`；
+  `docker inspect --format '{{json .HostConfig.PortBindings}}'` 确认只绑 `192.168.199.2`。
+
+**客户端**：`/opt/data/memories/nas_cdp.py`（用 `/opt/data/.venv-browser/bin/python` 跑）。
+
+```bash
+python nas_cdp.py status            # 探活
+python nas_cdp.py refresh-cookies   # 从源浏览器拉登录态注入
+python nas_cdp.py douyin <url>
+python nas_cdp.py bilibili <url>
+```
+
+### 5.6.1 CDP 登录态与风控（四个实测坑）
+
+1. 🔴 **抖音页面 `wait_until="domcontentloaded"` 会挂死** —— 页面长连接不结束，一直等到 timeout。
+   一律用 `wait_until="commit"` + 显式 `wait_for_timeout(9000~12000)`。
+2. 🔴 **抖音 `sessionid` 是 HttpOnly，`document.cookie` 取不到** —— 必须走 CDP `Storage.getCookies`。
+   且 **`Storage.getCookies` 不能传 `browserContextId`**（传了返回空）。
+3. 🔴 **登录态来源优先「从已登录浏览器只读导出」而不是让 BOSS 扫码**：
+   BOSS 的 Windows Chrome 有常开 CDP（`http://192.168.199.184:9224`），
+   `Storage.getCookies` **不新建也不关闭任何标签**，完全无打扰（BOSS 硬要求：绝不抢焦点）。
+   导出的 cookie 用 Playwright `context.add_cookies()` 注入，字段需裁剪成
+   `{name,value,domain,path,expires,httpOnly,secure,sameSite}`；CDP 的 `sameSite` 只接受 `Strict/Lax/None`，
+   `expires=-1`（会话 cookie）要**省略**而不是传 -1。
+4. 🔴 **别用 `grep sessionid /data/Default/Cookies` 验证登录态** —— 那是加密 SQLite，查不到明文属正常。
+   判据是**行为**：`docker restart cdp-chrome` 后**不注入 cookie** 直接 headless 打开视频页，
+   能拿到标题/作者/点赞数且 `视频数据加载中` 消失 → 登录态确实持久化在卷里。
+
+自测基线（2026-10-16 实测通过）：
+- 抖音 `https://v.douyin.com/DDW2g-qE1F0/` → 跳 `/video/7694963842081851259`，
+  标题「每月白嫖74亿token的开源项目…」、作者「亚莱加德」、36.9万赞、`video_src` 拿到 `.mp4`。
+- B站 `https://www.bilibili.com/video/BV1GJ411x7h7` → h1/UP主/播放量齐全，`has_video=true`。
 
 ## 六、汇报给 BOSS 时
 
