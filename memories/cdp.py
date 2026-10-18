@@ -17,13 +17,33 @@ cdp.py — 远程 CDP 客户端（Windows ChromeCDP via netsh portproxy）
         print(c.cookies("douyin.com"))
 """
 import json
+import os
 import re
 import time
 import urllib.request
 
 from websocket import create_connection
 
-CDP_URL = "http://192.168.199.184:9224"
+# 端点优先级：环境变量 > NAS 本机 headless（192.168.199.2:9222，无需 BOSS 的 Windows 开机）
+#           > Windows Chrome（192.168.199.184:9224，有登录态，可兜底）
+def _probe(u, t=2.5):
+    try:
+        urllib.request.urlopen(u.rstrip("/") + "/json/version", timeout=t).read(1)
+        return True
+    except Exception:
+        return False
+
+
+def pick_url():
+    cands = [os.environ.get("CDP_URL"), "http://192.168.199.2:9222",
+             "http://192.168.199.184:9224"]
+    for u in [x for x in cands if x]:
+        if _probe(u):
+            return u
+    return "http://192.168.199.2:9222"
+
+
+CDP_URL = pick_url()
 
 
 class CDP:

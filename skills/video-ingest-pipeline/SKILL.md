@@ -64,12 +64,55 @@ such links; or a task needs durable notes built from video content.
 
 ## When the downloader is walled: borrow the browser's own signature (douyin)
 
-`yt-dlp` 的抖音提取器会**固定**报 `HTTP Error 403 — Failed to download web detail JSON`：它算不出
-`a_bogus` 签名。**这不是 cookie 问题**（刷新到含 `sessionid` 的 cookie 后依旧 403），也不是换
+**已修好：yt-dlp 仍是最好的入口，靠一个本地插件补上签名这一步。**
+
+> 速度：解析/下载已从 71s/条 降到 **17.8s/条**（29s 视频实测）。两个关键修复：
+> ① `dy_cdp._capture_detail` 旧版收到响应后**不 break**，死等满 `wait=25s` ——
+> 命中后再收 1.5s 就收工，解析 26s→5.2s；
+> ② `ingest.py` 的 `fetch_meta` + `download` 是**两次 yt-dlp 调用**=两次 CDP 解析，
+> 改用 `fetch_and_download()` 一次调用带 `--write-info-json`，省一半。
+
+**抓主页作品列表必须开 focus emulation。** 后台标签（BOSS 要求不抢焦点）会被 Chrome 节流，
+抖音虚拟列表永远不加载第二屏 —— 实测只拿到 **28 条**，开 `Emulation.setFocusEmulationEnabled`
+后同样的滚动变成 27→63→135→**473** 条。另外 `eval_js("()=>x")` 只是把箭头函数本身返回
+（序列化成 `{}`），必须写成 `(()=>x)()` 才能拿到数值；`window.scrollBy` 对抖音主页无效，
+要滚 `overflow:scroll` 且可滚距离最大的那个 div。
+
+**CDP 端点默认走 NAS 本机 headless，不再依赖用户的 Windows 机。**
+优先级写死在 `memories/cdp.py`：`环境变量 CDP_URL` > `http://192.168.199.2:9222`（NAS 上的
+`cdp-chrome` 容器，headless Chrome，profile 持久化）> `http://192.168.199.184:9224`（用户 Windows 上的
+Chrome，有登录态）。`pick_url()` 用 2.5s `/json/version` 探测挑活的，`dy_cdp._capture_detail` 再按端点
+逐个重试，所以 NAS 挂了会自动回落 Windows，不需要改代码。
+实测差异：解析 9.1s（headless）vs 5.2s（Windows），单条全流程 28.0s vs 17.8s —— **用 10s/条换掉「用户的
+电脑必须开机」这个依赖，值得**。列表抓取也走这条：headless 每轮新增 18 条（Windows 36~54 条），慢但可用。
+公开视频**不需要登录态**（detail 接口靠页面 JS 自己生成 ttwid/msToken）；只有私密/仅自己可见的作品才需要
+账号，profile 在 `/volume2/2-AI/cdp-profile` 持久化，扫一次码长期有效。
+**判断「有没有登录」只用 `/user/self`**：登录态正常时会渲染出本人主页（昵称/关注/粉丝数），未登录会跳登录页。
+**别拿 `https://www.douyin.com/` 首页判断** —— 它会 302 到 `/jingxuan`（抖音精选电脑版），那个页面里既没有
+「登录」按钮也没有二维码元素，据此得出的「未登录、找不到登录入口」是假结论。详见 `references/cdp-endpoints.md`。
+容器自检与重建命令见 `references/cdp-endpoints.md`。
+
+插件 `/opt/data/home/.yt-dlp/plugins/douyin-cdp/yt_dlp_plugins/extractor/douyin_cdp.py`
+在导入时猴补 `DouyinIE._real_extract`：内部借 CDP 页面上下文拿 `play_addr`，**下载/重试/进度/格式选择
+仍由 yt-dlp 自己做**（`yt-dlp -j <短链>` 现在直接出 `extractor_key: DouyinCDP` + 多个 format）。
+关键坑：补丁必须放在 `yt_dlp_plugins/extractor/` 下，不能放 `yt_dlp_plugins/__init__.py` ——
+根插件在核心之前加载，`from yt_dlp.extractor.tiktok import DouyinIE` 会抛异常被吞掉，静默不生效
+（表现：`-v` 里能看到 plugin 目录，但报错栈还在 `tiktok.py:_real_extract`）。
+上游这条路走不通：抖音 detail 接口有 Argus 风控，裸 HTTP 一律
+`403 Blocked by ArgusSecurityPlugin Uifid Not Found` —— 实测 `curl_cffi --impersonate chrome`
+伪装 TLS 后**依然是同一句 403**，加 `device_platform/aid` 参数、加 Referer 都无效；
+而同一个 URL 在页面上下文里 `fetch` 却 200。所以「换 cookie / 换 UA / 升级 yt-dlp」全是死路，
+最新版 2026.08.19 的提取器仍是无签名裸 GET。
+
+机制（插件内部就是这条）：
+
+`yt-dlp` 的原生抖音提取器会**固定**报 `Fresh cookies (not necessarily logged in) are needed`：它算不出
+`a_bogus` 签名。**这不是 cookie 问题**（刷新到含 `sessionid` 的 cookie 后依旧报同一句），也不是换
 API key 能解决的（上游 key 已停用）。分享页 `iesdouyin.com/share/video/<id>/` 只返回壳数据，
 没有 `play_addr`。**别在这两条路上耗轮次**，它们永远不会通。
 
-可用的路只有一条：**借用已登录 Chrome 页面自身的 JS 去签名，旁观它发出的 `aweme/detail` 响应。**
+可用的路只有一条：**借用 Chrome 页面自身的 JS 去签名，旁观它发出的 `aweme/detail` 响应。**
+（不需要登录态也能拿公开视频——headless 实测同样 200。）
 
 1. 短链解出 `aweme_id`：`curl -sS -o /dev/null -w '%{url_effective}' -L '<短链>'`，取 `/video/(\d+)`。
 2. 经 CDP 在**后台标签**打开 `https://www.douyin.com/video/<id>`（建标签必须 `background=True`，
@@ -79,8 +122,26 @@ API key 能解决的（上游 key 已停用）。分享页 `iesdouyin.com/share/
    能拿到真实昵称的地方（见上文「`%(uploader)s` 是数字 UID」的坑）。
 4. 直链带时效签名，**立刻下载**，别缓存 URL 隔一会儿再下。
 
-已固化：`/opt/data/memories/dy_cdp.py` 暴露 `fetch(share_url, workdir) -> (meta_dict, video_path)`；
-`ingest.py` 在 `plat == "douyin"` 且 yt-dlp 失败时自动调它兜底，元数据以 yt-dlp 优先、CDP 补齐。
+已固化：`/opt/data/memories/dy_cdp.py` 暴露 `fetch(share_url, workdir) -> (meta_dict, video_path)`。
+**`ingest.py` 对抖音现在是 yt-dlp 优先、CDP 兜底**（2026-10-17 晚改回）：装了插件后 yt-dlp 一条命令
+就能解析+下载，实测 ESP32 那条 18MB 走 yt-dlp 成功；只有插件路径异常（Chrome 没开 / CDP 不通）才回落
+`dy_cdp.fetch`。非抖音平台仍走 yt-dlp 原路。
+
+## 链接丢了也能自己重跑，别让用户重发
+
+BOSS 的原话要求：**「一定要我再发一次吗？」——不要。** 抖音/B站链接本身就躺在 gateway 日志里，
+自己捞回来重跑，这是默认动作，不是可选项。
+
+```bash
+# 入站原文（含完整分享文案与短链），按时间窗过滤
+grep -a "Inbound dm message received" /opt/data/logs/gateway.log \
+  | awk '$0 >= "2026-10-17 16:00"' | grep -a "douyin" | tail -6
+# 只捞短链
+ grep -aoE "https?://v\.douyin\.com/[A-Za-z0-9_-]+" /opt/data/logs/*.log | sort -u
+```
+
+捞不到时再往上层找：`session_search` 按视频主题词查会话历史。**只有两条路都空**才回头问用户。
+重跑后用返回里的视频标题与失败时那句标题逐字比对，确认跑的是同一条 —— 短链会指向不同作品。
 
 ## Skill-Bearing Videos: Install by Default
 
@@ -130,8 +191,11 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
   title in frontmatter so nothing is lost, but a 200-char name breaks wikilinks and paths.
 - **Escape a regex character class when splitting on `#`** — a bare `#` inside `re.split` is a
   comment and silently returns the whole string.
-- **Netscape cookie files**: session cookies with `expires = -1` get dropped by yt-dlp with a
-  warning. Check that the cookies you actually need survived the export.
+- **Netscape cookie 文件：`expires = -1` 会让 yt-dlp 丢弃整条 cookie**。CDP 的
+  `Storage.getCookies` 对会话 cookie 返回 `-1`，直接写进文件就是非法行，yt-dlp 跳过并告警 ——
+  表现是「导出了 70 条却一条没用」。导出脚本必须把 `exp < 0` 归零：`exp = int(...) or 0; if exp < 0: exp = 0`
+  （`memories/refresh_douyin_cookies.py` 已修）。**但别指望修好 cookie 就能救抖音下载** ——
+  cookie 再新鲜，原生提取器仍报 `Fresh cookies ... are needed`；要么走 douyin-cdp 插件，要么直接 CDP。
 - **Writing outside the writable root fails for file tools** but not for shell `cp`/`ln`. Build
   the note locally, then copy into the vault; `os.makedirs` the destination dir first.
 - **当 vault 连 shell 都写不进时（属主是别人、组只有 r-x），用 root 容器借道写，再把属主 chown 回去。**
@@ -160,6 +224,10 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
   所以「端到端复跑一遍证明管线通了」这个动作本身会抹掉刚做的专有名词校正、frontmatter 补全和核实段。
   复跑前先 `cp` 一份校对版到 `cache/scratch/`，跑完比对行数与 md5，再把校对版还原、用 `push_to_vault` 重推。
   别因为「本地还留着一份」就以为安全 —— 被覆盖的就是那一份。
+- **入库中途失败会在 vault 里留下 `.hermes-tmp.*` 临时文件**，同步脚本会把它当未跟踪文件带出来。
+  清理走 root 容器（普通 shell 写不进 vault）：
+  `sudo -n docker run --rm -v /volume2/2-AI/obsidian_vault:/v alpine sh -c 'rm -f "/v/08-抖音视频学习/.hermes-tmp."*'`，
+  跑完回读 `ls -a | grep -c hermes-tmp` 应为 0。
 - **On screen-recording videos, frame OCR cannot recover the project name.** Burning-in subtitles
   sit at low contrast and OCR reads only scattered fragments; cropping and upscaling the region
   that should hold the identifier makes it *worse* (blur, not resolution). For those, treat the
@@ -168,6 +236,10 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
   **本地 OCR 跑不动就换视觉模型读少量关键帧**：RapidOCR 在 CPU 上逐帧跑整套帧集必超时
   （实测 exit 124）。此时别调参重跑，抽 4~6 张均匀分布的关键帧交给视觉模型直读 —— 烧录字幕
   它认得出，而且一张一次调用、有明确上限。
+- **`aweme_detail: null` 不是抓取失败，先看 `filter_detail.filter_reason`。** 被删/仅自己可见的作品会正常
+  返回 200，body 是 `{"aweme_detail":null,"filter_detail":{"filter_reason":"status_self_see","detail_msg":
+  "因作品权限或已被删除，无法观看"}}`。此时换端点、换 UA、重试都是白费——判据是 `filter_reason` 有值就跳过
+  该作品并记一笔，不要报成「headless 抓不到」。同理：批量里偶发 1 条失败先看 reason，再怀疑管线。
 - **On douyin, `%(uploader)s` is the author's numeric UID, not their nickname.** The downloader
   hands back `41506980594`, which lands in frontmatter as `author:` and reads as garbage to
   anyone browsing the vault. Prefer the nickname the share text already carries (users paste
@@ -181,6 +253,7 @@ Rust, same org) matched on every heuristic but handles PDF only, while the corre
 
 ## Depth
 - `references/platform-routes.md` — verified fetch route per platform, frame-OCR corrections, batch-OCR cost.
+- `references/cdp-endpoints.md` — CDP 端点选择与故障切换、NAS headless 容器自检/重建、headless 的能力边界。
 - `scripts/ingest_one.py` — the single-link ingest flow end to end, ready to adapt.
 
 ## Open-source project videos: verify, don't transcribe

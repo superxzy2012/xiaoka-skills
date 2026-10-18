@@ -104,12 +104,14 @@ if ! git -C "$LOCAL" remote get-url "$REMOTE" >/dev/null 2>&1; then
 fi
 if git -C "$LOCAL" remote get-url "$REMOTE" >/dev/null 2>&1; then
   for i in 1 2 3; do
-    if git -C "$LOCAL" push -q "$REMOTE" main 2>/dev/null; then
-      echo "   ✅ pushed (第${i}次)"; exit 0
+    err=$(mktemp)
+    if git -C "$LOCAL" push "$REMOTE" main 2>"$err"; then
+      echo "   ✅ pushed (第${i}次)"; rm -f "$err"; exit 0
     fi
-    sleep 20   # github.com 间歇性不可达，实测恢复需 45-75s
+    [ "$i" != "3" ] && { echo "   …push 第${i}次失败，60s 后重试: $(tail -1 "$err")"; sleep 60; }
+    rm -f "$err"   # github.com 间歇性不可达，实测恢复需 45-75s，重试间隔拉到 60s；stderr 落临时文件不再被吞
   done
-  echo "   ⚠️ push 失败（网络），本地仓已保存，下次自动重试"
+  echo "   ⚠️ push 3次均失败（见上stderr），本地仓已保存，下次自动重试"
 else
   echo "   ⏭ 未配置 remote"
 fi

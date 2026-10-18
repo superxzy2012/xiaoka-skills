@@ -69,7 +69,8 @@ def main():
     for c in extra:
         codes = codes + [(c, c)]
     d = fetch(codes)
-    now = datetime.datetime.now()
+    # 容器系统时区为 UTC，行情时段判定与展示必须用北京时间（UTC+8）
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).replace(tzinfo=None)
     if not d:
         print("❌ 行情获取失败", file=sys.stderr)
         return 1

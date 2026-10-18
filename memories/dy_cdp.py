@@ -42,14 +42,31 @@ def resolve_aweme_id(share_url):
 
 
 def _capture_detail(aweme_id, wait=25):
-    """开 CDP 标签，旁观 aweme/detail 响应。"""
+    """开 CDP 标签，旁观 aweme/detail 响应。多端点自动故障切换。"""
+    import cdp as _cdpmod
+    eps = [x for x in [_cdpmod.CDP_URL, "http://192.168.199.2:9222",
+                       "http://192.168.199.184:9224"] if x]
+    seen, err = [], None
+    for ep in eps:
+        if ep in seen:
+            continue
+        seen.append(ep)
+        try:
+            return _capture_once(aweme_id, ep, wait)
+        except Exception as e:
+            err = e
+    raise err or RuntimeError("所有 CDP 端点均失败")
+
+
+def _capture_once(aweme_id, ep, wait=25):
     url = f"https://www.douyin.com/video/{aweme_id}"
     hits = []
-    with CDP() as c:
+    with CDP(url=ep) as c:
         c.new_tab("about:blank", background=True)
         c.call("Network.enable", {}, c._sid)
         c.call("Page.navigate", {"url": url}, c._sid)
         t0 = time.time()
+        got_at = None
         while time.time() - t0 < wait:
             try:
                 c.ws.settimeout(2)
@@ -67,6 +84,12 @@ def _capture_detail(aweme_id, wait=25):
                 u = (p.get("response") or {}).get("url", "")
                 if any(w in u for w in WANT):
                     hits.append(p["requestId"])
+                    if got_at is None:
+                        got_at = time.time()
+            # 命中后再收 1.5s 兜底（同一条常有多份响应），然后立刻收工。
+            # 旧版死等到 wait=25s，导致每次解析固定 26s —— 这是全链路最大的假耗时。
+            if got_at and time.time() - got_at > 1.5:
+                break
         detail = None
         for rid in hits:
             try:

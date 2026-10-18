@@ -134,6 +134,23 @@ def main():
     else:
         report.append(f"✅ 记忆本体 4 层齐备")
 
+    # 7. 模型通道健康（T-015：通道日变，每天顺手真实 ping 主通道+降级链）
+    try:
+        cc = subprocess.run(
+            ["python3", f"{MEM_LOCAL}/channel_check.py"],
+            capture_output=True, text=True, timeout=120)
+        lines = [l for l in cc.stdout.splitlines() if l.startswith("-")]
+        n_ok = sum(1 for l in lines if l.startswith("- ✅"))
+        n_bad = sum(1 for l in lines if l.startswith("- ❌"))
+        if cc.returncode == 1:
+            report.append("❌ 模型主通道与所有降级全挂")
+            problems.append("模型通道全挂（见 channel_check.py）")
+        else:
+            tail = "，主通道挂但降级可用" if cc.returncode == 0 and any("主通道挂" in l for l in cc.stdout.splitlines()) else ""
+            report.append(f"✅ 模型通道 {n_ok} 通 / {n_bad} 挂{tail}")
+    except Exception as e:
+        report.append(f"⚠️ 通道自检未运行: {str(e)[:60]}")
+
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     out = [f"🔎 小卡自检 {ts}", ""] + report
     if problems:

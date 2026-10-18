@@ -34,6 +34,8 @@ def main():
         path = k.get("path", "/")
         secure = "TRUE" if k.get("secure") else "FALSE"
         exp = int(k.get("expires", 0) or 0)
+        if exp < 0:      # CDP 对会话 cookie 返回 -1，yt-dlp 会判定非法直接跳过整条
+            exp = 0
         lines.append(f"{dom}\t{flag}\t{path}\t{secure}\t{exp}\t{k['name']}\t{k['value']}")
     with open(f"{OUT_DIR}/douyin_cookies.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

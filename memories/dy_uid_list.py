@@ -8,9 +8,30 @@ UID = sys.argv[1]
 MAXROLL = int(sys.argv[2]) if len(sys.argv) > 2 else 60
 OUT = f"/opt/data/cache/scratch/dyprof_{UID[:12]}.json"
 
+SCROLL_GRID = r"""
+(()=>{
+  let b=null, g=0;
+  for (const e of document.querySelectorAll('div,main,section')) {
+    const s=getComputedStyle(e);
+    if (s.overflowY==='scroll' || s.overflowY==='auto') {
+      const d=e.scrollHeight-e.clientHeight;
+      if (d>g) { g=d; b=e; }
+    }
+  }
+  if (!b) return 'no-grid';
+  b.scrollTop = b.scrollHeight;
+  return Math.round(b.scrollTop)+'/'+b.scrollHeight;
+})()
+"""
+
 c = CDP()
 try:
-    c.new_tab("about:blank")
+    # 后台开标签（BOSS 要求绝不抢焦点）+ focus emulation（否则后台节流，只拿到第一屏）
+    c.new_tab("about:blank", background=True)
+    try:
+        c.call("Emulation.setFocusEmulationEnabled", {"enabled": True}, c._sid)
+    except Exception:
+        pass
     c.goto(f"https://www.douyin.com/user/{UID}", wait=10)
 
     info = c.eval_js("""
@@ -48,14 +69,14 @@ try:
             if m:
                 seen.add(m.group(1))
         gained = len(seen) - before
-        print(f"  滚动{i+1:02d}: 本页{len(links):3d} 新增{gained:3d} 累计{len(seen)}")
+        pos = c.eval_js(SCROLL_GRID)
+        print(f"  滚动{i+1:02d}: 本页{len(links):3d} 新增{gained:3d} 累计{len(seen)} scroll={pos}")
         if gained == 0:
             stall += 1
             if stall >= 4:
                 break
         else:
             stall = 0
-        c.eval_js("window.scrollBy(0, 2600)")
         time.sleep(1.5)
 
     vids = sorted(seen)

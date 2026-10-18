@@ -126,6 +126,35 @@ def download(url, plat, workdir):
     return os.path.join(workdir, sorted(files)[0])
 
 
+def fetch_and_download(url, plat, workdir):
+    """一次 yt-dlp 调用同时拿元数据 + 下载。
+    抖音每次解析都要借 CDP 开页面旁观 detail 响应（约 5s），
+    fetch_meta + download 两段跑就是两次解析，白白多花一份时间。"""
+    cmd = [YTDLP, "-f", "best[ext=mp4]/best", "--write-info-json",
+           "--no-playlist", "--no-warnings", "-o", f"{workdir}/%(id)s.%(ext)s"]
+    ck = COOKIES.get(plat)
+    if ck and os.path.exists(ck):
+        cmd += ["--cookies", ck]
+    cmd.append(url)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    files = [f for f in os.listdir(workdir) if f.endswith((".mp4", ".mkv", ".webm", ".flv"))]
+    if not files:
+        log(f"[error] 下载失败: {(r.stderr or '')[-400:]}")
+        return {}, None
+    video = os.path.join(workdir, sorted(files)[0])
+    meta = {}
+    for f in os.listdir(workdir):
+        if f.endswith(".info.json"):
+            try:
+                d = json.load(open(os.path.join(workdir, f)))
+                meta = {"id": d.get("id"), "title": d.get("title"),
+                        "author": d.get("uploader") or d.get("uploader_id"),
+                        "duration": d.get("duration")}
+            except Exception:
+                pass
+    return meta, video
+
+
 def extract_frames(video, outdir, every=15):
     os.makedirs(outdir, exist_ok=True)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", video,
@@ -256,24 +285,27 @@ def ingest_one(url, keyword="", keep_video=False, dry=False, push=True):
     os.makedirs(work, exist_ok=True)
     log(f"\n=== [{plat}] {url}")
 
-    meta = fetch_meta(url, plat)
-    video = download(url, plat, work)
-
-    # ── CDP 兜底（2026-10-16）──
-    # yt-dlp 的抖音提取器要自己签 a_bogus，抖音升级后固定 403
-    # （Failed to download web detail JSON: HTTP Error 403）。
-    # 换路：借 BOSS 已登录 Chrome 里页面自己的 JS 去签名，我们只旁观
-    # Network.responseReceived → getResponseBody 拿 aweme_detail。见 dy_cdp.py。
-    if not video and plat == "douyin":
-        log("  yt-dlp 失败 → 走 CDP 兜底通道（借浏览器登录态）")
-        try:
-            import dy_cdp
-            cmeta, video = dy_cdp.fetch(url, work)
-            meta = {**(meta or {}),
-                    **{k: v for k, v in cmeta.items() if v not in (None, "", 0)}}
-            log(f"  CDP: {cmeta.get('author')} / 直链来源 {cmeta.get('src_key')}")
-        except Exception as e:
-            log(f"  ⚠️ CDP 兜底也失败: {e}")
+    meta, video = {}, None
+    if plat == "douyin":
+        # 抖音：yt-dlp 优先（2026-10-17 修好）。本机 yt-dlp 装了 douyin-cdp 插件
+        # （/opt/data/home/.yt-dlp/plugins/douyin-cdp），插件借 BOSS 已登录 Chrome 的
+        # 页面上下文拿 play_addr，下载仍由 yt-dlp 自己做（重试/进度/格式全保留）。
+        # 原生提取器为何废：抖音 detail 接口被 Argus 风控，裸 HTTP 一律
+        # 403 "Uifid Not Found"（curl_cffi 伪装 TLS 也一样），cookie 再新都没用。
+        meta, video = fetch_and_download(url, plat, work)
+        if not video:
+            log("  ⚠️ yt-dlp 失败，回落 CDP 直链下载")
+            try:
+                import dy_cdp
+                cmeta, video = dy_cdp.fetch(url, work)
+                meta = {k: v for k, v in cmeta.items() if v not in (None, "", 0)} or meta
+                log(f"  CDP: {cmeta.get('author')} / 直链来源 {cmeta.get('src_key')}")
+            except Exception as e:
+                log(f"  ⚠️ CDP 也失败: {e}")
+                video = None
+    else:
+        meta = fetch_meta(url, plat)
+        video = download(url, plat, work)
 
     # 视频 ID：yt-dlp 元数据优先，其次 CDP，最后从 URL 推
     vid = str(meta.get("id") or "").strip()
