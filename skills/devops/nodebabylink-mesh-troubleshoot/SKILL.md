@@ -1,0 +1,201 @@
+---
+name: nodebabylink-mesh-troubleshoot
+description: Use when 节点小宝/绿联组网不通。先用 RouteAdd 权威表定位对端 IP，再用 16880 探针判定数据面。
+---
+
+# 节点小宝（绿联远程组网）排障
+
+NAS 上跑的是 `owjdxb` 容器（`ionewu/nblink`，`--network host`），组网网段 `100.66.1.x`。
+排障只有一条主线：**先确定「对端 IP 到底是谁」，再谈隧道。** 跳过这一步会在错误的机器上查一整轮。
+
+## 铁律 0：peerid↔主机↔IP 只认 NAS 自己的 RouteAdd 日志
+
+任何人（含另一个 agent、另一台机器的自检报告）告诉你「对端 NAS peer = XXX」「NAS 是 100.66.1.5」，**都不算证据**。
+服务端下发的路由表才是权威，它落在 `NodeBabyLinkService.log` 的 `RouteAdd` 行里，`Comment` 字段就是主机名。
+
+```bash
+SVC=/data/store/OWData/owjdxb/.ownbsv/NodeBabyLinkService.log
+ssh -o BatchMode=yes -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2 "
+  sudo -n docker exec owjdxb sh -c \"grep -a RouteAdd $SVC | tail -12\" \
+  | sed -E 's/^([0-9-]+ [0-9:]+).*Pid:([A-Z0-9]+).*LocalIp:(100\.66\.1\.[0-9]+).*Comment:([^ ]*).*/\1 | \2 | \3 | \4/'"
+```
+
+输出即「时间 | peerid | 组网IP | 主机名」。本机自己的 peerid 从进程参数取：
+
+```bash
+sudo -n docker exec owjdxb sh -c "ps aux | grep -o 'peerid [A-Z0-9]*' | head -1"
+```
+
+**为什么必须这样查**：组网 IP 会重排（历史上有过 .5→.7 变动），peerid 是稳定的。对方报告里写「NAS peer = 076ED239...」而日志显示该 peer 是 `super`（Windows），就会导致云端一直打 Windows 的端口，而 Windows 上没有目标服务 —— 症状恰好是「TCP 建连但零字节」，看起来像隧道坏了，其实连错机器。
+
+## 铁律 1：宿主网络只能借 `--net=host` 容器看，`sudo -n ip` 的输出是假的
+
+**`sudo -n` 只免密 `/usr/bin/docker`，对 `ip` / `ss` / `iptables` 一律静默失败返回空输出。**
+把「空输出」当成「没有接口/没有路由」，会直接得出「宿主根本没建隧道」的错误结论 —— 本技能上一版就是这么写错的。
+
+宿主真实的隧道态：**有 `NodeBabyLink` 接口（MTU 1430）**，持有 `10.222.222.1` 本地虚拟网关，
+`100.66.1.x` 全部 `via 10.222.222.1 dev NodeBabyLink`。所以组网是 **L3 路由 + relay 端口映射并存**，不是「没有 tun」。
+
+```bash
+A=docker.m.daocloud.io/library/alpine:3.18
+# 宿主路由（100.66/10.222 全量）—— 唯一可靠读法
+sudo -n docker run --rm --net=host $A ip route | grep -E '100\.66|10\.222|default'
+# 宿主真实 IP（容器内没 ip 命令时）
+sudo -n docker exec owjdxb sh -c "grep -B1 '/32 host LOCAL' /proc/net/fib_trie" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u
+# 接口清单 / 网络模式
+sudo -n docker exec owjdxb sh -c "ls /sys/class/net/"
+sudo -n docker inspect owjdxb --format 'Net={{.HostConfig.NetworkMode}}'   # host = 与宿主共享 netns
+```
+
+`ip -4 -br addr` 在 busybox/alpine 下可能返回空，**别据此判定没有地址**，用上面两条。
+`10.222.222.1` 在 NAS 和 Windows 上同时出现是**正常的**（每台机器各自的本地虚拟网关），不是 IP 冲突，不要追。
+
+**反向推论**：`ping 100.66.1.x` 恒通且 RTT < 0.5ms，是本地代答，永远不能用来判断链路。
+
+### 「ping 全通 0.1ms」是 tun 本地代答，不是真通
+
+对端（尤其是自建了 tun 的云端客户端）报「ping 100.66.1.1~.5 全通，rtt 0.04~0.1ms」时，这是它本机 tun 在**自己应答自己**：真实跨机 RTT 不可能 0.04ms。
+配套症状是「所有端口 TCP 秒 accept 但零字节」= accept 发生在本地桩，数据面根本没出网。
+判据：**RTT < 0.5ms 一律视为本机代答**，改用真实业务请求验证（见下）。
+
+## 铁律 1.5：一发 16880 探针定生死
+
+每台 nblink 客户端都在 **16880** 起一个管理 HTTP 口，任何路径访问它都回 `404` + 19 字节 body。
+**对端 16880 能回 404，就证明「请求出去 + 响应回来」双向都穿过了隧道** —— 这一发比任何日志统计都硬。
+
+```bash
+for t in 100.66.1.6:16880 100.66.1.5:16880 100.66.1.7:3457 100.66.1.7:3000; do
+  r=$(curl -s -m4 -o /tmp/b -w '%{http_code}' "http://$t/" 2>/dev/null); printf '%-20s %s %sb\n' "$t" "${r:-000}" "$(wc -c </tmp/b 2>/dev/null)"
+done; rm -f /tmp/b
+```
+
+| 结果 | 判读 |
+|---|---|
+| `16880 → 404 19b` | 隧道双向通。**任何「隧道坏了」的结论到此作废**，回头查 IP 归属 / 目标端口有没有服务 |
+| `16880 → 000` | 真·数据面不通，才轮到查 relay / 重启客户端 |
+| `16880 → 404` 但业务端口 `000` | 打错机器（那台上没这个服务），不是链路问题 |
+
+配合铁律 0 的权威表一起看：`100.66.1.5:16880` 有应答 = 那台是 Windows super，不是 NAS。
+
+### `btlBW 0` 不等于隧道坏
+
+`net_measure.go ... end btlBW 0 rateSent 132209 warmeUpSent 132209 phase Drain` 只是**relay 带宽探测**读数，
+必须交叉验证 `share_dat.go:771 shareDataConnHealthCheck ... [n/5] speed rcv N/s snd N/s`：
+双向非零 = relay 真在传数据（空闲态会掉到 20/s 级心跳，仍是通的）。
+
+同理，`tunnel LAN accept ... use of closed network connection`、`tunnel NPTU start fail: ice.Dial: the agent is closed`、
+`startTcpNatypeDetect ... NAT fail` 这三类刷屏**只说明直连打洞失败、退化成 relay**，不代表隧道没建立。
+看到 `relay num/rated 5/5` + `all tunnel is ready` 就该按「通」处理。
+
+## 铁律 1.6：端口存活用 banner 探针，别用 shell `/dev/tcp`
+
+`timeout N bash -c 'exec 3<>/dev/tcp/$h/$p && head -c 60 <&3'` 这种写法会**静默假阴性**：实测对 5 台主机全部返回空，
+而其中 3 台的 22 当时是通的。据此会得出「全网 SSH 都挂了」的错误结论，白查一轮。
+
+用 python socket 建连后 `recv(80)` 读 banner：一条命令覆盖多主机多端口，而且 banner 自带版本与系统指纹，
+能直接分辨「这是哪台机器」。
+
+```bash
+python3 <skill>/scripts/probe_ports.py 192.168.199.2:22 100.66.1.5:22 100.66.1.6:22 100.66.1.6:3457
+```
+
+判读规则：
+
+| 结果 | 含义 | 下一步 |
+|---|---|---|
+| 有 banner | 端口真开，且对端进程真的应答了 | 继续测业务（16880 / HTTP / SSH 登录） |
+| `TimeoutError` | 被安全组或防火墙丢包 | 换组网 IP 试，公网 22 超时是常态 |
+| `ConnectionRefusedError` | 主机活着，但该端口没监听 | 去那台机器上查服务 |
+
+- **超时与拒绝含义完全不同**，汇报时不能都写成「不通」。
+- 公网 IP 的 22 超时、组网 IP 的 22 通，是常态（安全组只放业务端口），不是故障。
+- **绑 `127.0.0.1` 的调试口（Chrome 9222/9223 之类）从别的机器直探必然失败**：先在那台机器上
+  `netstat -ano | Select-String ':9223'` 确认有没有监听，再用 SSH `-L <本地>:127.0.0.1:9223` 隧道探本地端口。
+  直探远端 IP 失败 ≠ 服务挂了；不先看监听就把锅判给隧道，会重复排查错方向。
+
+## 铁律 2：判定「服务是否真活着」用本机 127.0.0.1，不用组网 IP
+
+```bash
+# 管理面：应返回一大坨 openapi JSON
+curl -s -m4 -o /dev/null -w ':%{http_code} %{size_download}b\n' http://127.0.0.1:3457/api/openapi.json
+
+# 容器真身 + 端口绑定（必须是 0.0.0.0，不能是 127.0.0.1）
+sudo -n docker ps -a --format '{{.Names}} | {{.Status}} | {{.Ports}}' | grep -iE 'obsidian|mcp|hive'
+```
+
+本机 200 = 服务没问题，故障在链路；本机也 000 = 服务挂了，才轮到重启容器。
+**顺序不能反** —— 先怀疑链路会白查一轮，先怀疑服务会误重启健康的容器。
+
+## 铁律 3：MCP 端点不能用裸 TCP / GET 探测
+
+Streamable-HTTP MCP 端点（`/mcp`）对非法请求**直接关连接**，表现就是「建连即断、零字节」。
+用 nc / telnet / 浏览器 / GET 去探，必然得出「隧道坏了」的错误结论。
+
+| 探测方式 | 正常返回 | 含义 |
+|---|---|---|
+| `GET /mcp` | `400` | 端点活着，拒绝 GET |
+| `GET /` | `404` | 正常，无根路由 |
+| `POST /mcp` + `initialize` | `200` + SSE | **唯一有效判据** |
+| `GET /api/openapi.json`（管理面） | `200` + JSON | 服务健康 |
+
+```bash
+curl -s -m8 -i -X POST http://<IP>:3456/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"1"}}}'
+```
+
+成功返回 `HTTP 200` + `event: message` + `data: {"jsonrpc":"2.0","id":1,"result":{...}}`。
+**`Accept` 必须同时含 `application/json` 和 `text/event-stream`**，缺一个会被拒。
+
+## 诊断流程（按序执行）
+
+1. **取权威表**（铁律 0）→ 确认目标 IP 归属主机，确认本机 peerid。
+2. **查该 peer 有没有隧道记录**：
+   ```bash
+   sudo -n docker exec owjdxb sh -c "grep -ac <PEERID> $SVC; grep -a <PEERID> $SVC | tail -4"
+   ```
+   - 只有 `yun_syncer.go` 的 `RouteAdd`/`RouteDel` = **只有路由同步，从未建立数据隧道** → 对端没连过本机，是打错 IP 了。
+   - 出现 `tun`/`dial`/`relay` 且 add→del→add 抖动 = 真在连但握手不稳。
+3. **看本机隧道计数**：
+   ```bash
+   sudo -n docker exec owjdxb sh -c "grep -aiE 'tun estab|disco' $SVC | tail -4"
+   ```
+   `estab:N disco:N` 计数相等且持续增长 = 建立即断。注意这是**全局计数**，不代表就是跟那个 peer。
+
+3b. **打一发 16880 定生死**（铁律 1.5）：对端 16880 回 `404 19b` 就说明隧道双向通，
+   后面所有「隧道坏了」的结论都不成立 —— 直接回去核对 IP 归属和目标端口。
+4. **本机直测目标服务**（铁律 2），确认服务侧无辜。
+5. **白名单不是阻塞点**：
+   ```bash
+   sudo -n docker exec owjdxb sh -c "grep -aiE 'whitelist' $SVC | tail -3"
+   ```
+   `get device whitelist 0 entries` 在两端都出现 = 「团队设备白名单」功能未启用（空 = 不限制），**不要当成授权缺失去折腾**。
+6. **收敛汇报**：给出「正确 IP + 对方该跑的一条 curl」。不要在没有新证据时反复换参数重测。
+
+## 汇报格式（对方是另一个 agent 时）
+
+- **结论先行**：一句话说「你打错机器了 / 服务挂了 / 隧道真坏了」。
+- 附**权威表**（组网IP | peerid | 主机名），让对方自己核对，而不是只给结论。
+- 附**本机实测原始输出**（HTTP 码 + 字节数），不给形容词。
+- 给出**对方可直接粘贴的一条命令**，把要改的那个数字标出来。
+
+## 附：本环境权威表（2026-10-18 实测，IP 重排后须重新核对）
+
+| 组网IP | peerid | 主机名 | 备注 |
+|---|---|---|---|
+| .5 | `076ED239F320636BOW` | super | Windows 中心机，**最常被误当成 NAS** |
+| .6 | `A6EACE9FF0406464OW` | VM-43-229-ubuntu | 云端 VPS（Queen） |
+| .7 | `B84CEAA15FDF8765OW` | DXP4800-【BOSS英文名】 | **NAS 本机（hive 在这台）** |
+
+实测可用的 hive 入口（经组网 IP，非 127.0.0.1）：
+`http://100.66.1.7:3456/mcp`（obsidian）、`:3458/mcp`（skillbox）、管理面 `:3457`/`:3459`、Gitea `:3000`。
+
+**IP 重排后重新认设备**：别信任何人的报告，跑一遍 16880 探针矩阵（铁律 1.5），谁回 `404 19b` 就是活着的 nblink 客户端；
+再用铁律 0 的 `RouteAdd` 表把 peerid 映射回主机名。两步即可重建权威表。
+
+## 相关
+
+- mihomo 旁路由/代理/测速：技能 `nas-proxy-sidecar`（同为 `--network host`，但两套东西无关，别混）
+- NAS 容器部署通用坑：技能 `nas-docker-deploy`
+- NAS SSH：`ssh -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2`，`sudo -n` 只免密 `/usr/bin/docker`；容器内**无 `ping`**（`sh: ping: not found`），要测连通性用 `curl -w '%{http_code}/%{size_download}'` 或宿主侧测。

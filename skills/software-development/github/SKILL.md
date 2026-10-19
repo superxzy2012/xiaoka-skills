@@ -48,6 +48,13 @@ Supporting assets: `scripts/gh-env.sh` + `scripts/git-credential-token.py`
   `gh pr view --comments` — decisions live in threads, not titles.
 - Sweep for duplicates before creating anything:
   `gh pr list --search` / `gh issue list --search`.
+- **A 404 on a repo does not mean the repo is missing.** GitHub returns 404
+  (not 403) for private repos the token cannot see, so scope failure and
+  nonexistence are indistinguishable by status code alone. Before reporting
+  "repo doesn't exist", read `x-oauth-scopes` off the response headers
+  (`curl -sD - -o /dev/null -H "Authorization: Bearer $TOK" https://api.github.com/user`).
+  A token limited to `public_repo` 404s every private repo of its own owner —
+  that is a permission fact, not evidence about the repo.
 
 ## Verification
 

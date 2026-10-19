@@ -94,6 +94,7 @@ Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile i
 | In-session slash commands | `references/slash-commands.md` |
 | Provider setup, API keys, OAuth | `references/providers-and-models.md` |
 | config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
+| Skill library too big / prompt budget / "砍技能" — prune with `skills.disabled` | `references/skill-library-pruning.md` + `scripts/audit_skill_library.py` |
 | AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
 | Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
 | Delegation, cron, curator, kanban | `references/background-systems.md` |
@@ -210,4 +211,4 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Message role alternation** — never two assistant or two user messages in a row; only `tool` results can repeat.
 - **Secrets in `.env`, settings in `config.yaml`** — never tell a user to put a non-credential setting in `.env`.
 - **Profile-safe paths** — `get_hermes_home()` in code, `$HERMES_HOME` when resolving paths in a session.
-- **Never hand-edit `config.yaml` for the user** — use `hermes config set KEY VAL`; a stray indent can corrupt the file and break the live gateway.
+- **Never hand-edit `config.yaml` for the user** — use `hermes config set KEY VAL`; a stray indent can corrupt the file and break the live gateway. Exception for list-valued settings (`skills.disabled`, `toolsets`, …) where there is no usable `config set` form: write them with a script that backs the file up first and round-trips `yaml.safe_load` before saving, then confirm the count. See `references/skill-library-pruning.md`.

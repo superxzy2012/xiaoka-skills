@@ -1,0 +1,355 @@
+# 技能离线索引（345 个已从常驻提示摘除的技能）
+
+**disabled 技能不能用 skill_view**（会报 disabled）。三种用法，任选：
+1. `read_file('<path>')` —— 直接读 SKILL.md 正文，按内容执行（最快，推荐）
+2. 需要它的 scripts/ 时：`ls <path 所在目录>` 后按需 read_file / 运行
+3. 想恢复常驻：把 config.yaml `skills.disabled` 里那行删掉（或用 hermes skills 重新启用）
+
+查表不要整篇读：用 `search_files(pattern='关键词', path='/opt/data/memories/SKILL_INDEX_OFF.md')` 或 grep 名字。
+
+格式：`- 名称 — 一句话 — 路径`
+
+- `3d-animation-short-generator` — | — /opt/nas/volume2/2-AI/skills/3d-animation-short-generator/SKILL.md
+- `Data` — Work with data across the full lifecycle fro — /opt/nas/volume2/2-AI/skills/Data/SKILL.md
+- `Mercado Libre` — Use Mercado Libre to search, compare, buy, s — /opt/nas/volume2/2-AI/skills/mercado-libre/SKILL.md
+- `Swarm Intelligence` — 仿生蜂群智能（Swarm Intelligence） — /opt/nas/volume2/2-AI/skills/swarm-intelligence__skillhub/SKILL.md
+- `Web Development` — Build, debug, and deploy websites with HTML, — /opt/nas/volume2/2-AI/skills/web/SKILL.md
+- `afs-gateway-reinstall` — 重装/更新 AFS（Flask+chat2api）0-token 网关桌面端时，保留 2 — /opt/nas/volume2/2-AI/skills/afs-gateway-reinstall/SKILL.md
+- `afs-stack-windows-deploy` — 在 Windows 上部署与运维「AFS 全家桶」——AFS 桌面应用（Chat2API — /opt/nas/volume2/2-AI/skills/afs-stack-windows-deploy/SKILL.md
+- `agent-browser` — Vercel 官方 AI 浏览器自动化 CLI（41k+ stars） — /opt/nas/volume2/2-AI/skills/web/agent-browser/SKILL.md
+- `agent-browser-core` — OpenClaw skill for the agent-browser CLI (Ru — /opt/nas/volume2/2-AI/skills/agent-browser-core/SKILL.md
+- `agent-memory-store` — Shared semantic memory store for AI agents.  — /opt/nas/volume2/2-AI/skills/agent-memory-store/SKILL.md
+- `agent-model-routing-setup` — Configure agent model routing combos and swi — /opt/nas/volume2/2-AI/skills/agent-model-routing-setup/SKILL.md
+- `agent-orchestration` — Master the art of spawning and managing sub- — /opt/nas/volume2/2-AI/skills/agent-orchestration/SKILL.md
+- `agent-reach` — > — /opt/nas/volume2/2-AI/skills/agent-reach/SKILL.md
+- `agnes-ai-generation` — Call Agnes AI / Sapiens AI generation APIs f — /opt/nas/volume2/2-AI/skills/agnes-ai-generation/SKILL.md
+- `aihot` — 查询 AI HOT 的中文 AI 资讯、精选、当前热点和日报 — /opt/nas/volume2/2-AI/skills/aihot/SKILL.md
+- `airtable` — Airtable REST API via curl. Records CRUD, fi — /opt/data/skills/productivity/airtable/SKILL.md
+- `amazon-global-prices` — >- — /opt/nas/volume2/2-AI/skills/amazon-global-prices/SKILL.md
+- `anker-yangmeng-perspective` — | — /opt/nas/volume2/2-AI/skills/anker-yangmeng-perspective/SKILL.md
+- `apple-notes` — Manage Apple Notes via memo CLI: create, sea — /opt/data/skills/apple/apple-notes/SKILL.md
+- `apple-reminders` — Apple Reminders via remindctl: add, list, co — /opt/data/skills/apple/apple-reminders/SKILL.md
+- `architecture-diagram` — Dark-themed SVG architecture/cloud/infra dia — /opt/data/skills/creative/architecture-diagram/SKILL.md
+- `arkcli-agent` — arkcli agent：管理 ARK Managed Agents，包括 Agent  — /opt/nas/volume2/2-AI/skills/arkcli-agent/SKILL.md
+- `arkcli-api-explorer` — arkcli Raw API Explorer：调用已注册的 Action 作为产品命令 — /opt/nas/volume2/2-AI/skills/arkcli-api-explorer/SKILL.md
+- `arkcli-auth` — arkcli 认证管理：交互式登录、Volc SSO 登录、查看状态、退出登录、生成 A — /opt/nas/volume2/2-AI/skills/arkcli-auth/SKILL.md
+- `arkcli-billing` — 查询火山引擎 ARK 拆分账单明细（结算金额、Token 用量计费），支持按账期月、月范 — /opt/nas/volume2/2-AI/skills/arkcli-billing/SKILL.md
+- `arkcli-chat` — arkcli +chat：通过数据面 Responses API 快速对话/推理，支持多 — /opt/nas/volume2/2-AI/skills/arkcli-chat/SKILL.md
+- `arkcli-code-example` — arkcli +code-example：为指定基础模型生成多语言（Python / G — /opt/nas/volume2/2-AI/skills/arkcli-code-example/SKILL.md
+- `arkcli-config` — arkcli 本地配置管理 — /opt/nas/volume2/2-AI/skills/arkcli-config/SKILL.md
+- `arkcli-connect` — arkcli +connect：将 arkcli 内嵌的 AI skills 安装到本机 — /opt/nas/volume2/2-AI/skills/arkcli-connect/SKILL.md
+- `arkcli-custommodel` — arkcli 自定义模型仓库管理：从 TOS 导入自定义模型、查询/筛选自定义模型、查看 — /opt/nas/volume2/2-AI/skills/arkcli-custommodel/SKILL.md
+- `arkcli-datasets` — 使用 ArkCLI 创建、校验、查询、更新、删除、版本化和下载 Dataset — /opt/nas/volume2/2-AI/skills/arkcli-datasets/SKILL.md
+- `arkcli-deploy` — arkcli +deploy：普通创建推理接入点（Endpoint）的统一首选入口 — /opt/nas/volume2/2-AI/skills/arkcli-deploy/SKILL.md
+- `arkcli-doctor` — arkcli doctor 统一入口，覆盖 CLI 健康、account、error、i — /opt/nas/volume2/2-AI/skills/arkcli-doctor/SKILL.md
+- `arkcli-gen` — 火山方舟 Ark 图片/视频生成入口：支持 profile 默认资源与临时 API Ke — /opt/nas/volume2/2-AI/skills/arkcli-gen/SKILL.md
+- `arkcli-helper` — arkcli helper：为 Claude Code / Codex / OpenCo — /opt/nas/volume2/2-AI/skills/arkcli-helper/SKILL.md
+- `arkcli-infer-endpoint` — arkcli 推理接入点管理与显式 raw CRUD 创建能力 — /opt/nas/volume2/2-AI/skills/arkcli-infer-endpoint/SKILL.md
+- `arkcli-models` — arkcli 模型查询与基础模型服务激活能力：列出、搜索、获取火山公共基础模型详情，以及 — /opt/nas/volume2/2-AI/skills/arkcli-models/SKILL.md
+- `arkcli-onboard` — arkcli 接入向导(workflow):把某个模型接入到自己的应用/服务的端到端引导 — /opt/nas/volume2/2-AI/skills/arkcli-onboard/SKILL.md
+- `arkcli-plans` — ARK 套餐管理(Agent Plan / Coding Plan,个人版 + 企业版) — /opt/nas/volume2/2-AI/skills/arkcli-plans/SKILL.md
+- `arkcli-pricing` — 查询火山引擎 ARK 基础模型结算单价（含当前账号折扣）以及 AgentPlan / C — /opt/nas/volume2/2-AI/skills/arkcli-pricing/SKILL.md
+- `arkcli-profile` — arkcli profile 切面管理：列出、查看、新建、切换、删除、重命名 profi — /opt/nas/volume2/2-AI/skills/arkcli-profile/SKILL.md
+- `arkcli-resources` — arkcli resources 实时控制面查询：列出当前/指定 profile 可见资 — /opt/nas/volume2/2-AI/skills/arkcli-resources/SKILL.md
+- `arkcli-shared` — arkcli 共享执行协议：首次配置入口、业务命令执行前的认证闸门、命令路由与选择顺序、 — /opt/nas/volume2/2-AI/skills/arkcli-shared/SKILL.md
+- `arkcli-train-finetune` — 使用 ArkCLI 创建、查询和管理模型精调训练任务，并从训练指标选择最佳 step、导 — /opt/nas/volume2/2-AI/skills/arkcli-train-finetune/SKILL.md
+- `arkcli-understand` — arkcli +understand：基于 Responses API 的 12 个多模 — /opt/nas/volume2/2-AI/skills/arkcli-understand/SKILL.md
+- `arkcli-usage` — ARK 用量查询:`usage stats`(Token / 请求数,5-30 分钟延迟 — /opt/nas/volume2/2-AI/skills/arkcli-usage/SKILL.md
+- `arxiv` — Search arXiv papers by keyword, author, cate — /opt/data/skills/research/arxiv/SKILL.md
+- `ascii-video` — ASCII video: convert video/audio to colored  — /opt/data/skills/creative/ascii-video/SKILL.md
+- `audit-shopify-store` — >- — /opt/nas/volume2/2-AI/skills/audit-shopify-store/SKILL.md
+- `ba-hybrid-decision` — 当 A 方案有 blocker 时，识别 B+A 混合替代方案，保留 A 核心价值的同时 — /opt/nas/volume2/2-AI/skills/ba-hybrid-decision/SKILL.md
+- `baoyu-infographic` — Infographics: 21 layouts x 21 styles (信息图, 可 — /opt/data/skills/creative/baoyu-infographic/SKILL.md
+- `blocked-page-recovery` — Use when a fetch fails: 403/429, paywall, WA — /opt/nas/volume2/2-AI/skills/web/blocked-page-recovery/SKILL.md
+- `book-to-skill` — Converts books and documents (PDF, EPUB, DOC — /opt/nas/volume2/2-AI/skills/book-to-skill/SKILL.md
+- `box` — Box manages cloud files, sharing, search, an — /opt/data/skills/productivity/box/SKILL.md
+- `brainstorming` — 当用户需要发散创意、突破思维瓶颈、评估多个方案，或面对"想不出好点子/选择困难"时使用 — /opt/nas/volume2/2-AI/skills/brainstorming/SKILL.md
+- `brand-promo-video-generator` — For marketers and creators producing promoti — /opt/nas/volume2/2-AI/skills/brand-promo-video-generator/SKILL.md
+- `browser-doc-capture` — Use when 抓取需登录态的网页文档（飞书 wiki/docx 等）入库：虚拟滚动逐 — /opt/nas/volume2/2-AI/skills/web/browser-doc-capture/SKILL.md
+- `bryumi` — Autonomous multi-agent task orchestration wi — /opt/nas/volume2/2-AI/skills/bryumi/SKILL.md
+- `bug-hunting-workflow` — 网安漏洞挖掘/安全研究工作流——基于 Obsidian「网安-周小粥」41篇+「网安-阿 — /opt/nas/volume2/2-AI/skills/bug-hunting-workflow/SKILL.md
+- `capacity` — Discovers available Azure OpenAI model capac — /opt/nas/volume2/2-AI/skills/microsoft-foundry/models/deploy-model/capacity/SKILL.md
+- `ceo-delegation` — CEO式任务委派工作流程 — /opt/nas/volume2/2-AI/skills/ceo-delegation/SKILL.md
+- `chartgen` — > — /opt/nas/volume2/2-AI/skills/analysis-data/SKILL.md
+- `claude-code` — Delegate coding to Claude Code CLI (features — /opt/data/skills/autonomous-ai-agents/claude-code/SKILL.md
+- `claude-design` — Design one-off HTML artifacts (landing, deck — /opt/data/skills/creative/claude-design/SKILL.md
+- `co-op-game-intro-generator` — For users creating a two-player co-op game m — /opt/nas/volume2/2-AI/skills/co-op-game-intro-generator/SKILL.md
+- `code-simplifier` — 在保持功能与行为完全不变的前提下，将复杂、冗余、难读的代码改写为更简洁、可读、可维护的版 — /opt/nas/volume2/2-AI/skills/code-simplifier/SKILL.md
+- `codebase-inspection` — Inspect codebases w/ pygount: LOC, languages — /opt/data/skills/software-development/codebase-inspection/SKILL.md
+- `codex` — Delegate coding to OpenAI Codex CLI (feature — /opt/data/skills/autonomous-ai-agents/codex/SKILL.md
+- `codex-desktop-zh-setup` — 在 macOS 上安装配置中文界面的 Codex 桌面版（OpenAI Codex De — /opt/nas/volume2/2-AI/skills/codex-desktop-zh-setup/SKILL.md
+- `codex-plusplus-repair` — 诊断并修复 macOS 上 Codex++ 皮肤/增强层导致的 Codex 桌面版故障（ — /opt/nas/volume2/2-AI/skills/codex-plusplus-repair/SKILL.md
+- `competitor-news-monitor` — Watch named companies for material news; cit — /opt/data/skills/research/competitor-news-monitor/SKILL.md
+- `computer-use` — | — /opt/nas/volume2/2-AI/skills/computer-use/SKILL.md
+- `consult-report` — 战略/市场分析咨询报告工作流——判断+数据双轨 — /opt/nas/volume2/2-AI/skills/consult-report/SKILL.md
+- `cover-pop` — Generate or plan thumb-stopping social cover — /opt/nas/volume2/2-AI/skills/cover-pop/SKILL.md
+- `crawl4ai` — 专为LLM设计的开源爬虫框架（81k+ stars） — /opt/nas/volume2/2-AI/skills/web/crawl4ai/SKILL.md
+- `cross-border-data-review` — 面向出海 HR、法务、IT 和隐私负责人，根据用户提供的国家/地区、员工或客户数据类型、 — /opt/nas/volume2/2-AI/skills/cross-border-data-review/SKILL.md
+- `customize` — Interactive guided deployment flow for Azure — /opt/nas/volume2/2-AI/skills/microsoft-foundry/models/deploy-model/customize/SKILL.md
+- `data-analysis-zh` — > — /opt/nas/volume2/2-AI/skills/data-analysis-zh/SKILL.md
+- `data-analyst-pro` — 表格数据不会挖？10 大场景一键分析，自动清洗+出图+给结论，揪出异常和趋势——不用你写 — /opt/nas/volume2/2-AI/skills/qclaw-data-analyst-pro/SKILL.md
+- `deepread-report-pipeline` — Use when deep-reading a long source into a r — /opt/data/skills/productivity/deepread-report-pipeline/SKILL.md
+- `deploy-model` — Unified Azure OpenAI model deployment skill  — /opt/nas/volume2/2-AI/skills/microsoft-foundry/models/deploy-model/SKILL.md
+- `design-md` — Author/validate/export Google's DESIGN.md to — /opt/data/skills/creative/design-md/SKILL.md
+- `document-to-action-items` — Extract cited obligations, deadlines, tasks  — /opt/data/skills/productivity/document-to-action-items/SKILL.md
+- `dogfood` — Exploratory QA of web apps: find bugs, evide — /opt/nas/volume2/2-AI/skills/dogfood/SKILL.md
+- `domain-modeling` — Build and sharpen a project's domain model.  — /opt/data/skills/domain-modeling/SKILL.md
+- `douyin-batch-import` — 接收一批抖音分享链接（视频），批量无水印下载、本地 whisper 转写口播、ffmpe — /opt/nas/volume2/2-AI/skills/douyin-batch-import/SKILL.md
+- `douyin-kb-feed` — 把指定抖音号的全部视频抓取→whisper转写→ffmpeg截帧→写入Obsidian知 — /opt/nas/volume2/2-AI/skills/douyin-kb-feed/SKILL.md
+- `douyin_copy_extract` — 粘贴抖音、快手、小红书、视频号公开可访问的短视频分享链接，一键提取标题、简介、口播文案， — /opt/nas/volume2/2-AI/skills/douyin-copy-extract__skillhub/SKILL.md
+- `duan-yongping-perspective` — | — /opt/nas/volume2/2-AI/skills/duan-yongping-perspective/SKILL.md
+- `e-commerce-find-skills` — 电商领域的Skills技能搜索，可搜索到更加优质专业的电商Skills — /opt/nas/volume2/2-AI/skills/e-commerce-find-skills/SKILL.md
+- `email-inbox-triage` — Triage an inbox: prioritize threads, draft r — /opt/data/skills/email/email-inbox-triage/SKILL.md
+- `evox-swarm-agent` — 蜂群式多Agent协作引擎——原子拆解→并行执行→文件汇合→经验沉淀 — /opt/nas/volume2/2-AI/skills/evox-swarm-agent__skillhub/SKILL.md
+- `find-skills` — 场景驱动+关键词双模式技能发现工具 — /opt/nas/volume2/2-AI/skills/find-skills/SKILL.md
+- `findmy` — Track Apple devices/AirTags via FindMy.app o — /opt/data/skills/apple/findmy/SKILL.md
+- `finetuning` — Fine-tune models on Microsoft Foundry using  — /opt/nas/volume2/2-AI/skills/microsoft-foundry/finetuning/SKILL.md
+- `firecrawl-build` — Integrate Firecrawl into application code wh — /opt/data/skills/web/firecrawl/firecrawl-build/SKILL.md
+- `firecrawl-build-interact` — Integrate Firecrawl `/interact` into product — /opt/data/skills/web/firecrawl/firecrawl-build-interact/SKILL.md
+- `firecrawl-build-onboarding` — Get Firecrawl credentials and SDK setup into — /opt/data/skills/web/firecrawl/firecrawl-build-onboarding/SKILL.md
+- `firecrawl-build-scrape` — Integrate Firecrawl `/scrape` into product c — /opt/data/skills/web/firecrawl/firecrawl-build-scrape/SKILL.md
+- `firecrawl-build-search` — Integrate Firecrawl `/search` into product c — /opt/data/skills/web/firecrawl/firecrawl-build-search/SKILL.md
+- `firecrawl-local-setup` — 本机 Firecrawl CLI 装法、认证状态与免费替代路径 — /opt/data/skills/web/firecrawl/firecrawl-local-setup/SKILL.md
+- `frontend-design` — Guidance for distinctive, intentional visual — /opt/data/skills/frontend-design/SKILL.md
+- `fullstack-dev` — | — /opt/nas/volume2/2-AI/skills/fullstack-dev/SKILL.md
+- `geekbi-ozon-research-skill` — 通过极鲸云查询和组合分析 Ozon 当前支持站点的真实商品、店铺、类目、关键词和评论数据 — /opt/nas/volume2/2-AI/skills/geekbi-ozon-research-skill/SKILL.md
+- `geekbi-ozon-shop-search-skill` — 使用极鲸云查询和分析 Ozon 当前支持站点的真实店铺数据，支持按店铺、主体、国家、品牌 — /opt/nas/volume2/2-AI/skills/geekbi-ozon-shop-search-skill/SKILL.md
+- `gif-search` — Search/download GIFs from Tenor via curl + j — /opt/data/skills/media/gif-search/SKILL.md
+- `glm-53-flash-vision-rag` — 基于智谱GLM-5.3-Flash视觉大模型的PDF深度问答与检索（vision RAG — /opt/nas/volume2/2-AI/skills/glm-53-flash-vision-rag/SKILL.md
+- `google-workspace` — Gmail, Calendar, Drive, Docs, Sheets via gws — /opt/data/skills/productivity/google-workspace/SKILL.md
+- `grill-me` — A relentless interview to sharpen a plan or  — /opt/nas/volume2/2-AI/skills/grill-me/SKILL.md
+- `grilling` — Grill the user relentlessly about a plan, de — /opt/nas/volume2/2-AI/skills/grilling/SKILL.md
+- `grounded-citations` — Ground answers and documents in cited, verif — /opt/data/skills/research/grounded-citations/SKILL.md
+- `h3-prompt-writing` — Write MiniMax H3 video generation prompts fo — /opt/nas/volume2/2-AI/skills/h3-prompt-writing/SKILL.md
+- `handdrawn-live-video-generator` — | — /opt/nas/volume2/2-AI/skills/handdrawn-live-video-generator/SKILL.md
+- `hermes-agent-skill-authoring` — Author in-repo SKILL.md files: frontmatter a — /opt/data/skills/software-development/hermes-agent-skill-authoring/SKILL.md
+- `hermes-desktop-plugins` — Write desktop app plugins that add UI panes  — /opt/nas/volume2/2-AI/skills/hermes-desktop-plugins/SKILL.md
+- `hermes-latency-tuning` — Use when agent 响应慢、要提速、或要做改前改后延迟基准 — /opt/data/skills/devops/hermes-latency-tuning/SKILL.md
+- `hermes-managed-env-c-ext-fix` — 根治 Hermes 网关在真实对话回合报 "No module named 'xxx._ — /opt/nas/volume2/2-AI/skills/hermes-managed-env-c-ext-fix/SKILL.md
+- `himalaya` — Himalaya CLI: IMAP/SMTP email from terminal. — /opt/data/skills/email/himalaya/SKILL.md
+- `huabei-finance-perspective` — | — /opt/nas/volume2/2-AI/skills/huabei-finance-perspective/SKILL.md
+- `i-have-adhd` — Shape output for a reader with ADHD: lead wi — /opt/nas/volume2/2-AI/skills/i-have-adhd/SKILL.md
+- `ian-xiaohei-illustrations` — 生成 Ian 风格的中文正文配图 — /opt/nas/volume2/2-AI/skills/ian-xiaohei-illustrations/SKILL.md
+- `imessage` — Send and receive iMessages/SMS via the imsg  — /opt/data/skills/apple/imessage/SKILL.md
+- `impeccable` — | — /opt/nas/volume2/2-AI/skills/impeccable/SKILL.md
+- `inspecting-hermes-desktop-dom` — Read the live Hermes desktop DOM/CSS over CD — /opt/data/skills/software-development/inspecting-hermes-desktop-dom/SKILL.md
+- `kb-course-factory` — Use when writing or selling online courses,  — /opt/data/skills/productivity/kb-course-factory/SKILL.md
+- `knowledge` — Unified knowledge capture and retrieval for  — /opt/nas/volume2/2-AI/skills/agent-knowledge/SKILL.md
+- `linkfox-1688-procurement` — 1688采购全流程技能 — /opt/nas/volume2/2-AI/skills/linkfox-1688-procurement/SKILL.md
+- `linkfox-1688-product-detail` — 1688 商品详情查询 — /opt/nas/volume2/2-AI/skills/linkfox-1688-product-detail/SKILL.md
+- `linkfox-1688-search-by-image` — 1688平台以图搜图，通过商品图片精准检索外观相似或同款的1688货源，返回标题、价格、 — /opt/nas/volume2/2-AI/skills/linkfox-1688-search-by-image/SKILL.md
+- `linkfox-aba-intelligent-query` — 亚马逊ABA（品牌分析）搜索词数据的查询与分析，涵盖15个站点近3年的周维度数据 — /opt/nas/volume2/2-AI/skills/linkfox-aba-intelligent-query/SKILL.md
+- `linkfox-ai-mode-google-search` — 基于 Google 搜索的 AI 概览（AI Overview / AI Mode）抓取 — /opt/nas/volume2/2-AI/skills/linkfox-ai-mode-google-search/SKILL.md
+- `linkfox-aigc-imagegen` — AI生图工具，根据提示词和参考图生成图片 — /opt/nas/volume2/2-AI/skills/linkfox-aigc-imagegen/SKILL.md
+- `linkfox-aigc-imagegen-brand-gene-extract` — 品牌基因样式提取原子技能 — /opt/nas/volume2/2-AI/skills/linkfox-aigc-imagegen-brand-gene-extract/SKILL.md
+- `linkfox-aigc-imagegen-cloth` — 服饰图生成（模特/服装类） — /opt/nas/volume2/2-AI/skills/linkfox-aigc-imagegen-cloth/SKILL.md
+- `linkfox-aigc-imagegen-product` — 商品图生成（非服饰类） — /opt/nas/volume2/2-AI/skills/linkfox-aigc-imagegen-product/SKILL.md
+- `linkfox-aigc-textgen` — AI生文工具，使用大语言模型根据提示词生成文本内容，支持图/视频/文结合理解 — /opt/nas/volume2/2-AI/skills/linkfox-aigc-textgen/SKILL.md
+- `linkfox-aigc-videogen` — AI生视频工具（首尾帧/单图模式），根据原图和提示词生成视频，支持可选尾帧图控制结束画面 — /opt/nas/volume2/2-AI/skills/linkfox-aigc-videogen/SKILL.md
+- `linkfox-aigc-videogen-multi` — 多参考图生视频工具，根据多张参考图和提示词生成视频 — /opt/nas/volume2/2-AI/skills/linkfox-aigc-videogen-multi/SKILL.md
+- `linkfox-amazon-ads-auth` — 亚马逊广告（Amazon Ads）店铺授权与管理技能，提供完整的授权流程、已绑定账号与站 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-ads-auth/SKILL.md
+- `linkfox-amazon-ads-manager` — 亚马逊广告（Amazon Ads）管理技能，覆盖 SP/SB/SD 的查询与创建/修改 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-ads-manager/SKILL.md
+- `linkfox-amazon-ads-report` — 亚马逊广告（Amazon Ads）报告一站式获取技能，覆盖 Sponsored Prod — /opt/nas/volume2/2-AI/skills/linkfox-amazon-ads-report/SKILL.md
+- `linkfox-amazon-ads-sp-insights-report` — 亚马逊广告 Sponsored Products（SP）洞察报告技能，统一获取 Audi — /opt/nas/volume2/2-AI/skills/linkfox-amazon-ads-sp-insights-report/SKILL.md
+- `linkfox-amazon-alexa-search` — 通过亚马逊前台的 Alexa 购物助手发起自然语言问答，获取与问题相关的导购回答、推荐商 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-alexa-search/SKILL.md
+- `linkfox-amazon-opportunity-report-by-keyword` — 按关键词查询亚马逊商业洞察报告，涵盖市场潜力、产品特征、用户评论、客户画像、搜索趋势、定 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-opportunity-report-by-keyword/SKILL.md
+- `linkfox-amazon-opportunity-search-by-metrics` — 亚马逊反向选品：基于历史商业洞察报告沉淀的指标数据池，按 30+ 项商业维度（市场规模与 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-opportunity-search-by-metrics/SKILL.md
+- `linkfox-amazon-policy-feed` — 查询亚马逊最新政策法规与资讯，支持按站点、时间区间分页检索资讯列表（含 AI 中文摘要） — /opt/nas/volume2/2-AI/skills/linkfox-amazon-policy-feed/SKILL.md
+- `linkfox-amazon-product-detail` — 通过ASIN获取亚马逊商品详细信息，包括标题、图片、五点描述、规格参数、A+页面、价格、 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-product-detail/SKILL.md
+- `linkfox-amazon-reviews-list` — 按ASIN获取并分析亚马逊商品评论，支持15个站点(含美国站)，按星级筛选评论 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-reviews-list/SKILL.md
+- `linkfox-amazon-search` — 模拟真实用户在亚马逊前台搜索，获取实时关键词排名和搜索结果页数据 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-search/SKILL.md
+- `linkfox-amazon-search-by-image` — 基于图片的亚马逊跨站点视觉商品搜索，支持8个站点的以图搜图和视觉相似商品发现 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-search-by-image/SKILL.md
+- `linkfox-amazon-store-aplus-content` — 亚马逊店铺 A+ Content（增强品牌内容）管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-aplus-content/SKILL.md
+- `linkfox-amazon-store-auth` — 亚马逊卖家店铺授权与账号连接管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-auth/SKILL.md
+- `linkfox-amazon-store-catalog` — 亚马逊商品目录（Catalog Items）查询 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-catalog/SKILL.md
+- `linkfox-amazon-store-customer-feedback` — 亚马逊商品与类目买家反馈洞察 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-customer-feedback/SKILL.md
+- `linkfox-amazon-store-external-fulfillment` — 亚马逊 External Fulfillment 外部履约管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-external-fulfillment/SKILL.md
+- `linkfox-amazon-store-fba` — 亚马逊 FBA 综合管理技能 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-fba/SKILL.md
+- `linkfox-amazon-store-feeds` — 亚马逊店铺 Feed 批量数据提交与处理状态管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-feeds/SKILL.md
+- `linkfox-amazon-store-fulfillment-inbound` — 亚马逊 FBA 入仓与 Fulfillment Inbound 全流程管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-fulfillment-inbound/SKILL.md
+- `linkfox-amazon-store-fulfillment-outbound` — 亚马逊 Multi-Channel Fulfillment（MCF）新版出仓履约管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-fulfillment-outbound/SKILL.md
+- `linkfox-amazon-store-listings` — 亚马逊卖家 Listing 刊登与商品类型定义管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-listings/SKILL.md
+- `linkfox-amazon-store-orders` — 亚马逊卖家订单查询与履约状态管理 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-orders/SKILL.md
+- `linkfox-amazon-store-pricing` — 亚马逊商品报价与竞争定价查询 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-pricing/SKILL.md
+- `linkfox-amazon-store-report` — 亚马逊卖家店铺报告获取与下载 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-report/SKILL.md
+- `linkfox-amazon-store-uploads` — 亚马逊 SP-API 通用文件上传 — /opt/nas/volume2/2-AI/skills/linkfox-amazon-store-uploads/SKILL.md
+- `linkfox-damai-mercado-market-intelligence` — 大麦数据 Mercado Libre（美客多）市场洞察与选品查询，通过 LinkFox  — /opt/nas/volume2/2-AI/skills/linkfox-damai-mercado-market-intelligence/SKILL.md
+- `linkfox-dld-product-billboard` — 查询1688商品热销榜单数据，用于货源发现和批发选品调研 — /opt/nas/volume2/2-AI/skills/linkfox-dld-product-billboard/SKILL.md
+- `linkfox-dld-product-search` — 在中国1688批发平台（阿里巴巴国内B2B市场）上搜索和分析商品，用于找货源、供应商发现 — /opt/nas/volume2/2-AI/skills/linkfox-dld-product-search/SKILL.md
+- `linkfox-echotik-batch-product-detail` — 批量查询TikTok商品详情数据，包括多周期销量与GMV（1天/7天/15天/30天/6 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-batch-product-detail/SKILL.md
+- `linkfox-echotik-batch-video-detail` — 批量查询TikTok视频详情数据，包括视频描述、播放量（总量及近1天/7天/30天增量） — /opt/nas/volume2/2-AI/skills/linkfox-echotik-batch-video-detail/SKILL.md
+- `linkfox-echotik-get-video-download-url` — 解析TikTok视频地址，返回该视频的无水印/含水印下载地址、播放地址与封面地址，用于保 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-get-video-download-url/SKILL.md
+- `linkfox-echotik-list-new-product-rank` — 通过EchoTik新品排行数据，发现TikTok Shop 16个区域市场的热门新品 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-new-product-rank/SKILL.md
+- `linkfox-echotik-list-product` — 搜索和分析TikTok商品数据，包括销量、达人带货数据、定价和佣金比例，覆盖16个Tik — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-product/SKILL.md
+- `linkfox-echotik-list-seller` — 搜索和分析TikTok Shop店铺（卖家）数据，按区域、类目、近30日GMV、销售趋势 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-seller/SKILL.md
+- `linkfox-echotik-list-seller-product` — 查询某个TikTok Shop店铺（卖家）的在售商品列表，通过sellerId获取该店铺 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-seller-product/SKILL.md
+- `linkfox-echotik-list-video` — 搜索和分析TikTok视频数据，按区域、达人、商品、类目、播放量、时长、发布时间、是否带 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-video/SKILL.md
+- `linkfox-echotik-list-video-rank` — 查询TikTok视频排行榜，按日榜、周榜或月榜以及区域与视频排名指标获取热门视频榜单，返 — /opt/nas/volume2/2-AI/skills/linkfox-echotik-list-video-rank/SKILL.md
+- `linkfox-echotik-product-video` — 查询TikTok商品的关联带货视频数据，包括播放量、点赞、评论、分享、视频销量与GMV， — /opt/nas/volume2/2-AI/skills/linkfox-echotik-product-video/SKILL.md
+- `linkfox-echotik-seller-detail` — 查询TikTok Shop店铺（卖家）详情，通过sellerId获取单个店铺的完整档案， — /opt/nas/volume2/2-AI/skills/linkfox-echotik-seller-detail/SKILL.md
+- `linkfox-google-patent-search` — 通过 Google Patents 公开专利数据库检索全球专利，支持关键词、发明人、受让 — /opt/nas/volume2/2-AI/skills/linkfox-google-patent-search/SKILL.md
+- `linkfox-google-trend-get-trend-by-keys` — Google Trends关键词搜索热度对比与趋势分析，支持全球区域和自定义时间范围 — /opt/nas/volume2/2-AI/skills/linkfox-google-trend-get-trend-by-keys/SKILL.md
+- `linkfox-google-trend-get-trend-by-time` — 查询并分析Google Trends在指定时间范围和国家/地区的实时热门话题与热搜 — /opt/nas/volume2/2-AI/skills/linkfox-google-trend-get-trend-by-time/SKILL.md
+- `linkfox-junglescout-keyword-by-asin` — Jungle Scout根据ASIN反查关键词，输入最多10个ASIN获取其在亚马逊搜索 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-keyword-by-asin/SKILL.md
+- `linkfox-junglescout-keyword-by-keyword` — Jungle Scout关键词拓展工具，根据种子关键词扩展出相关关键词列表，包含搜索量、 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-keyword-by-keyword/SKILL.md
+- `linkfox-junglescout-keyword-history` — Jungle Scout关键词历史搜索量查询，按7天周期返回亚马逊关键词的精确搜索量趋势 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-keyword-history/SKILL.md
+- `linkfox-junglescout-keyword-share-of-voice` — Jungle Scout关键词市场份额（Share of Voice）分析，返回亚马逊搜 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-keyword-share-of-voice/SKILL.md
+- `linkfox-junglescout-product-database` — Jungle Scout产品数据库多条件筛选，支持按品类、价格、销量、收入、评论、评分、 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-product-database/SKILL.md
+- `linkfox-junglescout-sales-estimates` — Jungle Scout ASIN销售估算查询，按日维度返回指定ASIN在一段时间内的每 — /opt/nas/volume2/2-AI/skills/linkfox-junglescout-sales-estimates/SKILL.md
+- `linkfox-keepa-product-request` — 通过ASIN获取亚马逊商品详情，包括价格、标题、Item Highlights（商品亮点 — /opt/nas/volume2/2-AI/skills/linkfox-keepa-product-request/SKILL.md
+- `linkfox-keepa-product-search` — 基于Keepa数据的亚马逊高级商品搜索与筛选，支持品类、价格、月销量、关键词、BSR排名 — /opt/nas/volume2/2-AI/skills/linkfox-keepa-product-search/SKILL.md
+- `linkfox-keepa-product-series` — 查询亚马逊商品的历史时序数据，包括价格走势、BSR（畅销排名）趋势、评分变化、卖家数量和 — /opt/nas/volume2/2-AI/skills/linkfox-keepa-product-series/SKILL.md
+- `linkfox-maidalv-product-tro-detection` — 通过卖大律检测产品是否存在 TRO（临时限制令）与知识产权（商标/专利/版权）侵权风险， — /opt/nas/volume2/2-AI/skills/linkfox-maidalv-product-tro-detection/SKILL.md
+- `linkfox-mercado-product-selection` — Mercado Libre（美客多）选品数据查询与分析，通过 LinkFox 网关统一调 — /opt/nas/volume2/2-AI/skills/linkfox-mercado-product-selection/SKILL.md
+- `linkfox-mpstats-ozon-brand-products` — MPSTATS Ozon 俄罗斯站按品牌下钻商品列表 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-brand-products/SKILL.md
+- `linkfox-mpstats-ozon-category-products` — MPSTATS Ozon 俄罗斯站按俄语类目路径下钻该类目全部商品 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-category-products/SKILL.md
+- `linkfox-mpstats-ozon-product-detail` — MPSTATS Ozon 俄罗斯站单个 SKU 全量详情查询 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-product-detail/SKILL.md
+- `linkfox-mpstats-ozon-product-search` — MPSTATS Ozon 俄罗斯站商品搜索与反查 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-product-search/SKILL.md
+- `linkfox-mpstats-ozon-product-trend` — MPSTATS Ozon 俄罗斯站单个 SKU 的分日时间序列表现 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-product-trend/SKILL.md
+- `linkfox-mpstats-ozon-seller-products` — MPSTATS Ozon 俄罗斯站按卖家 ID 下钻商品列表 — /opt/nas/volume2/2-AI/skills/linkfox-mpstats-ozon-seller-products/SKILL.md
+- `linkfox-product-title-analyze` — 对产品标题进行分词分析，提取词频、场景词、人群词、材质词等属性维度 — /opt/nas/volume2/2-AI/skills/linkfox-product-title-analyze/SKILL.md
+- `linkfox-ruiguan-copyright-detection` — 图片版权侵权检测与风险分析 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-copyright-detection/SKILL.md
+- `linkfox-ruiguan-detection-patent-design` — 基于睿观的外观专利侵权检测，支持25+国家/地区的图片专利检索 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-detection-patent-design/SKILL.md
+- `linkfox-ruiguan-gun-parts-search` — 基于睿观的产品图片政策合规检测，通过视觉相似度匹配识别潜在违规商品 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-gun-parts-search/SKILL.md
+- `linkfox-ruiguan-text-trademark-detection` — 面向电商产品Listing的文字商标检测与侵权风险分析 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-text-trademark-detection/SKILL.md
+- `linkfox-ruiguan-trademark-graphic-detection` — 产品图片的图形商标检测与相似度搜索 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-trademark-graphic-detection/SKILL.md
+- `linkfox-ruiguan-utility-patent-detection` — 基于产品信息检测和搜索相似的实用新型/发明专利 — /opt/nas/volume2/2-AI/skills/linkfox-ruiguan-utility-patent-detection/SKILL.md
+- `linkfox-seerfar-ozon-category-search` — Seerfar Ozon 类目商品搜索：按 Ozon 类目 ID 拉取该类目下的商品列表 — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-category-search/SKILL.md
+- `linkfox-seerfar-ozon-keyword-back-search` — Seerfar Ozon 关键词反查：按商品 SKU 列表（最多 20 个）反查 Ozo — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-keyword-back-search/SKILL.md
+- `linkfox-seerfar-ozon-keyword-mining` — Seerfar Ozon 关键词挖掘：围绕一个种子关键词挖掘 Ozon（及 Wildbe — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-keyword-mining/SKILL.md
+- `linkfox-seerfar-ozon-market-keyword-search` — Seerfar Ozon 市场热词搜索：按搜索热度、增长、商品数、卖家数、竞品数、价格、 — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-market-keyword-search/SKILL.md
+- `linkfox-seerfar-ozon-product-detail-search` — Seerfar Ozon 商品详情查询：按 Ozon 商品 SKU 拉取单个商品的完整详 — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-product-detail-search/SKILL.md
+- `linkfox-seerfar-ozon-product-report-search` — Seerfar Ozon 商品报表搜索：按销量、销售额、销量/销售额增长率、购物车转化率 — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-product-report-search/SKILL.md
+- `linkfox-seerfar-ozon-shop-search` — Seerfar Ozon 店铺商品搜索：按 Ozon 店铺（卖家）ID 拉取该店铺的商品 — /opt/nas/volume2/2-AI/skills/linkfox-seerfar-ozon-shop-search/SKILL.md
+- `linkfox-sellersprite-competitor-lookup` — 使用卖家精灵数据在亚马逊上查找和分析竞品，覆盖12个站点，包含销量、BSR、定价、评分和 — /opt/nas/volume2/2-AI/skills/linkfox-sellersprite-competitor-lookup/SKILL.md
+- `linkfox-sellersprite-market-research` — 使用卖家精灵选市场列表能力，基于类目维度筛选亚马逊细分市场，支持市场规模、竞争度、头部集 — /opt/nas/volume2/2-AI/skills/linkfox-sellersprite-market-research/SKILL.md
+- `linkfox-sellersprite-market-statistics` — 使用卖家精灵选市场统计能力，按类目节点输出市场统计看板，包含头部Listing平均评分、 — /opt/nas/volume2/2-AI/skills/linkfox-sellersprite-market-statistics/SKILL.md
+- `linkfox-sellersprite-product-search` — 使用卖家精灵数据搜索和筛选亚马逊商品，支持价格、月销量、BSR排名、毛利率、评分、配送方 — /opt/nas/volume2/2-AI/skills/linkfox-sellersprite-product-search/SKILL.md
+- `linkfox-sellersprite-traffic-keyword` — 使用卖家精灵流量词反查能力，按ASIN查询关键词流量来源、流量占比类型、转化类型、自然位 — /opt/nas/volume2/2-AI/skills/linkfox-sellersprite-traffic-keyword/SKILL.md
+- `linkfox-shopify-product-query` — 按多维度筛选独立站 Shopify 商品（关键词/URL、价格、周销量、上架时间、Fac — /opt/nas/volume2/2-AI/skills/linkfox-shopify-product-query/SKILL.md
+- `linkfox-shopify-store-query` — 按多维度筛选独立站 Shopify 店铺（店名/域名、国家、创建年限、产品数、广告数、月 — /opt/nas/volume2/2-AI/skills/linkfox-shopify-store-query/SKILL.md
+- `linkfox-sif-asin-keywords` — 使用SIF数据反查任意亚马逊ASIN的流量关键词，包括自然排名、广告排名、搜索量、流量占 — /opt/nas/volume2/2-AI/skills/linkfox-sif-asin-keywords/SKILL.md
+- `linkfox-sif-asin-summary` — 使用SIF（搜索情报框架）数据分析ASIN的流量来源构成与曝光分布，覆盖本期/上期/新进 — /opt/nas/volume2/2-AI/skills/linkfox-sif-asin-summary/SKILL.md
+- `linkfox-sif-keyword-overview` — 亚马逊市场关键词竞争度的SIF概览分析 — /opt/nas/volume2/2-AI/skills/linkfox-sif-keyword-overview/SKILL.md
+- `linkfox-sif-keyword-summary` — 在给定关键词下拆解所有竞品 ASIN 的流量来源——自然搜索、SP 广告、SB 品牌广告 — /opt/nas/volume2/2-AI/skills/linkfox-sif-keyword-summary/SKILL.md
+- `linkfox-temu-category-search` — 在已同步到本地库的 Temu 类目数据中按关键词检索类目中文名、英文名与类目 id，用于 — /opt/nas/volume2/2-AI/skills/linkfox-temu-category-search/SKILL.md
+- `linkfox-temu-product-query` — 按多维度筛选 Temu 商品（关键词/商品 ID/店铺 ID、前后台类目、价格、评分、评 — /opt/nas/volume2/2-AI/skills/linkfox-temu-product-query/SKILL.md
+- `linkfox-temu-store-query` — 按多维度筛选 Temu 店铺（店名/ID、国家站点、后台类目、全托管/半托管、总/周/月 — /opt/nas/volume2/2-AI/skills/linkfox-temu-store-query/SKILL.md
+- `linkfox-tiktok-creator` — TikTok 达人（Creator/affiliate creator）数据与可购物视频 — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-creator/SKILL.md
+- `linkfox-tiktok-shop-analytics` — TikTok Shop ERP 数据分析（Analytics）业务技能，经 /tikto — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-analytics/SKILL.md
+- `linkfox-tiktok-shop-auth` — TikTok Shop ERP（小店）专用授权与管理技能，固定 appType=erp， — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-auth/SKILL.md
+- `linkfox-tiktok-shop-fulfillment` — TikTok Shop ERP 履约（Fulfillment）业务技能，经 /tikto — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-fulfillment/SKILL.md
+- `linkfox-tiktok-shop-logistics` — TikTok Shop ERP 物流/仓库（Logistics）业务技能，经 /tikt — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-logistics/SKILL.md
+- `linkfox-tiktok-shop-order` — TikTok Shop ERP 订单（Order）业务技能，经 /tiktokShop/ — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-order/SKILL.md
+- `linkfox-tiktok-shop-product` — TikTok Shop ERP 商品（Product）业务技能，经 /tiktokSho — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-product/SKILL.md
+- `linkfox-tiktok-shop-product-detail` — 查询 TikTok Shop 公共商品详情 — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-product-detail/SKILL.md
+- `linkfox-tiktok-shop-return-refund` — TikTok Shop ERP 售后（Return & Refund）业务技能，经 /t — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-shop-return-refund/SKILL.md
+- `linkfox-tiktok-video` — TikTok 视频上传 API 业务技能，经 /tiktokVideo/develope — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-video/SKILL.md
+- `linkfox-tiktok-video-auth` — TikTok 达人体系授权与管理技能，经 /tiktokVideo 路由提供达人/视频号 — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-video-auth/SKILL.md
+- `linkfox-tiktok-video-products` — TikTok 视频号可带货商品查询技能，经 /tiktokVideo/developer — /opt/nas/volume2/2-AI/skills/linkfox-tiktok-video-products/SKILL.md
+- `linkfox-tsearch-search` — 网络搜索、在线检索、实时信息查询、搜索引擎搜索、Reddit等社区平台讨论、外部站点帖子 — /opt/nas/volume2/2-AI/skills/linkfox-tsearch-search/SKILL.md
+- `linkfox-wb-mpstats-ozon` — 面向 Ozon 俄罗斯站的商品发现、详情核验、趋势分析与品牌/类目/卖家选品洞察能力 — /opt/nas/volume2/2-AI/skills/linkfox-wb-mpstats-ozon/SKILL.md
+- `linkfox-wb-seerfar-ozon` — Ozon 市场、关键词、商品、店铺和类目数据选品分析能力，支持发现机会、筛选商品、反查流 — /opt/nas/volume2/2-AI/skills/linkfox-wb-seerfar-ozon/SKILL.md
+- `linkpix-ecom-image` — 一键生成电商商品图：商品主图+轮播图套图、电商详情页长图、按文字描述直出商业大图（四个自 — /opt/nas/volume2/2-AI/skills/linkpix-ecom-image/SKILL.md
+- `llm-wiki` — Karpathy's LLM Wiki: build/query interlinked — /opt/data/skills/research/llm-wiki/SKILL.md
+- `local-asset-versioning` — Use when versioning or publishing local priv — /opt/data/skills/local-asset-versioning/SKILL.md
+- `loopx` — LoopX 长周期 AI Agent 控制平面 — /opt/nas/volume2/2-AI/skills/loopx/SKILL.md
+- `luzhenyu-perspective` — | — /opt/nas/volume2/2-AI/skills/luzhenyu-perspective/SKILL.md
+- `mac-disk-cleanup` — 在 macOS 上做「磁盘空间告急」的体检与清理——找出占空间的大户、安全搬到外置盘/N — /opt/nas/volume2/2-AI/skills/mac-disk-cleanup/SKILL.md
+- `mac-llama-server-ops` — 在 macOS（Apple Silicon）部署 llama.cpp llama-ser — /opt/nas/volume2/2-AI/skills/mac-llama-server-ops/SKILL.md
+- `mac-memory-audit` — 在 macOS 上做内存体检与优化——找出占内存的大户进程（本地大模型服务、僵尸进程、E — /opt/nas/volume2/2-AI/skills/mac-memory-audit/SKILL.md
+- `mac-workbuddy-boot-repair` — 诊断并修复 macOS 上 WorkBuddy「检测到当前环境异常，WorkBuddy  — /opt/nas/volume2/2-AI/skills/mac-workbuddy-boot-repair/SKILL.md
+- `macos-dir-migration-symlink` — 把 macOS 用户目录/大目录无损迁移到外置盘（软链法），让应用无感知 — /opt/nas/volume2/2-AI/skills/macos-dir-migration-symlink/SKILL.md
+- `manim-video` — Manim CE animations: 3Blue1Brown math/algo v — /opt/data/skills/creative/manim-video/SKILL.md
+- `mano-cua` — Mano-P 纯视觉 GUI 自动化（名略科技开源） — /opt/nas/volume2/2-AI/skills/mano-cua/SKILL.md
+- `maoxuan-jinghua` — Use when 引用、分析或蒸馏《毛泽东选集》方法论——矛盾分析、调查研究、群众路线、 — /opt/data/skills/maoxuan-jinghua/SKILL.md
+- `maps` — Geocode, POIs, routes, timezones via OpenStr — /opt/data/skills/productivity/maps/SKILL.md
+- `market-research` — > — /opt/nas/volume2/2-AI/skills/market-research-pro/SKILL.md
+- `mattpocock-diagnosing-bugs` — Disciplined 6-phase bug diagnosis loop from  — /opt/nas/volume2/2-AI/skills/mattpocock-diagnosing-bugs/SKILL.md
+- `meeting-action-items` — Turn meeting notes into cited decisions, own — /opt/data/skills/productivity/meeting-action-items/SKILL.md
+- `memory-layered` — >- — /opt/nas/volume2/2-AI/skills/memory-layered/SKILL.md
+- `menglar-ozon-skills` — 基于萌啦OZON MCP协议的100项数据分析技能，覆盖类目/商品/店铺/品牌/关键词/ — /opt/nas/volume2/2-AI/skills/menglar-ozon-skills/SKILL.md
+- `microsoft-foundry` — >- — /opt/nas/volume2/2-AI/skills/microsoft-foundry/SKILL.md
+- `minimalist-product-ad-generator` — | — /opt/nas/volume2/2-AI/skills/minimalist-product-ad-generator/SKILL.md
+- `moark-search-pro` —  — /opt/nas/volume2/2-AI/skills/moark-search-pro/SKILL.md
+- `multi-agent-cn` — > — /opt/nas/volume2/2-AI/skills/multi-agent-cn/SKILL.md
+- `music-video-subtitle-generator` — | — /opt/nas/volume2/2-AI/skills/music-video-subtitle-generator/SKILL.md
+- `nano-banana-pro` — Generate/edit images with Nano Banana Pro (G — /opt/nas/volume2/2-AI/skills/nano-banana-pro/SKILL.md
+- `nas-storage-reclaim` — Use when reclaiming NAS space via dedup or m — /opt/data/skills/nas-storage-reclaim/SKILL.md
+- `node-inspect-debugger` — Debug Node.js via --inspect + Chrome DevTool — /opt/data/skills/software-development/node-inspect-debugger/SKILL.md
+- `notion` — Notion API + ntn CLI: pages, databases, mark — /opt/data/skills/productivity/notion/SKILL.md
+- `nuwa-skill` — Use when the user asks to distill, create, o — /opt/nas/volume2/2-AI/skills/nuwa-skill/SKILL.md
+- `omniroute-combo-gateway-ops` — OmniRoute(NAS 192.168.199.2:20128) 路由组合的新建/成 — /opt/nas/volume2/2-AI/skills/omniroute-combo-gateway-ops/SKILL.md
+- `openai-whisper-api` — Transcribe audio via OpenAI Audio Transcript — /opt/nas/volume2/2-AI/skills/openai-whisper-api/SKILL.md
+- `openclaw-mcp-tool-troubleshoot` — 诊断并修复 OpenClaw agent（阿正/诸葛亮/GM 等）拿不到 MCP 工具、 — /opt/nas/volume2/2-AI/skills/openclaw-mcp-tool-troubleshoot/SKILL.md
+- `openclaw-ops` — OpenClaw gateway 的日常运维、故障排查、配置调优和日志分析 — /opt/nas/volume2/2-AI/skills/openclaw-ops/SKILL.md
+- `openclaw-self-evolution` — OpenClaw 自主进化三件套：Dreaming（三层梦境记忆进化）、Active M — /opt/nas/volume2/2-AI/skills/openclaw-self-evolution/SKILL.md
+- `openclaw-skill-scanner` — Security gate for OpenClaw AgentSkills. Scan — /opt/nas/volume2/2-AI/skills/skill-scanner-guard/SKILL.md
+- `opencode` — Delegate coding to OpenCode CLI (features, P — /opt/data/skills/autonomous-ai-agents/opencode/SKILL.md
+- `opening-calibration` — 新对话/新任务开始时补齐 AI 记忆层的校准技能 — /opt/nas/volume2/2-AI/skills/opening-calibration/SKILL.md
+- `oss-ecosystem-survey` — Use when 盘点某平台/领域的 GitHub 开源全景清单 — /opt/data/skills/oss-ecosystem-survey/SKILL.md
+- `ozon-ai-media-pipeline` — Ozon 商品素材（图片 + 视频）生产与上传全流程实测手册（兰海 LANHAI 202 — /opt/nas/volume2/2-AI/skills/ozon-ai-media-pipeline/SKILL.md
+- `ozon-batch-listing-import` — Ozon 卖家后台「官方 Excel 模板批量上架」全链路自动化 Skill（Playw — /opt/nas/volume2/2-AI/skills/ozon-batch-listing-import/SKILL.md
+- `ozon-crossborder` — Ozon(俄罗斯)跨境电商全链路助手 —— 选品比价(1688抓价→利润核算)、定价(R — /opt/nas/volume2/2-AI/skills/ozon-crossborder__skillhub/SKILL.md
+- `ozon-gm-report-verify` — Use when 兰海GM报Ozon交付/归档/改价/排期：先验后台回执再采信，防"已做 — /opt/nas/volume2/2-AI/skills/crossborder-ecommerce/ozon-gm-report-verify/SKILL.md
+- `ozon-ops-expert` — Ozon 俄罗斯跨境电商运营专家 — /opt/nas/volume2/2-AI/skills/ozon-ops-expert/SKILL.md
+- `ozon-product-selection` — >- — /opt/nas/volume2/2-AI/skills/ozon-product-selection/SKILL.md
+- `ozon-seller-backend-api-forensics` — 在 Ozon 卖家后台做「零打扰」取证：复用 BOSS 已登录的 9222 标签 + 同 — /opt/nas/volume2/2-AI/skills/ozon-seller-backend-api-forensics/SKILL.md
+- `ozon-seller-card-edit` — 用 Playwright/CDP 自动化编辑 Ozon Seller 商品卡（标题、属性 — /opt/nas/volume2/2-AI/skills/ozon-seller-card-edit/SKILL.md
+- `ozon-standalone-lister` — 不依赖任何第三方付费服务、数据不出本机的 Ozon（俄罗斯电商）独立上架工具箱 — /opt/nas/volume2/2-AI/skills/ozon-standalone-lister/SKILL.md
+- `ozon-university` — 面向 Ozon 新手卖家和运营实习生的公开问答导航助手 — /opt/nas/volume2/2-AI/skills/ozon-university/SKILL.md
+- `ozon-zero-order-diagnosis` — Ozon 卖家后台「零订单 / 订单极少」的浏览器自动化诊断 Skill（Playwri — /opt/nas/volume2/2-AI/skills/ozon-zero-order-diagnosis/SKILL.md
+- `p5js` — p5.js sketches: gen art, shaders, interactiv — /opt/data/skills/creative/p5js/SKILL.md
+- `paodonglai-haier-perspective` — | — /opt/nas/volume2/2-AI/skills/paodonglai-haier-perspective/SKILL.md
+- `paper-collage-explainer-generator` — | — /opt/nas/volume2/2-AI/skills/paper-collage-explainer-generator/SKILL.md
+- `papercraft-stop-motion-explainer` — For creators explaining science, education,  — /opt/nas/volume2/2-AI/skills/papercraft-stop-motion-explainer/SKILL.md
+- `pdf-style-doc-remake` — 参考既有 PDF 的版式与配色，重制/升级一份新的正式文档（项目简要、方案书、报告），产 — /opt/nas/volume2/2-AI/skills/pdf-style-doc-remake/SKILL.md
+- `popular-web-designs` — 54 real design systems (Stripe, Linear, Verc — /opt/data/skills/creative/popular-web-designs/SKILL.md
+- `preset` — Intelligently deploys Azure OpenAI models to — /opt/nas/volume2/2-AI/skills/microsoft-foundry/models/deploy-model/preset/SKILL.md
+- `product-price-monitor` — Watch product, flight, or listing prices; al — /opt/data/skills/productivity/product-price-monitor/SKILL.md
+- `prompt-optimizer` — 明确任务 · 把模糊表达变成清晰任务 — /opt/nas/volume2/2-AI/skills/prompt-optimizer/SKILL.md
+- `python-debugpy` — Debug Python: pdb REPL + debugpy remote (DAP — /opt/data/skills/software-development/python-debugpy/SKILL.md
+- `rea-reverse-engineering` — Use when 用 REA 逆向分析已发布制品（二进制/安装包） — /opt/nas/volume2/2-AI/skills/rea-reverse-engineering/SKILL.md
+- `realtime-video-understanding` — Use when 实时/流式理解视频、摄像头、RTSP、连续图集 — /opt/nas/volume2/2-AI/skills/realtime-video-understanding/SKILL.md
+- `redacted-public-backup` — Use when publishing a workspace to a public  — /opt/data/skills/redacted-public-backup/SKILL.md
+- `remote-host-admin-escalation` — Use when a task needs remote-host admin righ — /opt/data/skills/devops/remote-host-admin-escalation/SKILL.md
+- `requesting-code-review` — Pre-commit review: security scan, quality ga — /opt/data/skills/software-development/requesting-code-review/SKILL.md
+- `samurai` — 整理资料 · 把资料整理成能用的东西 — /opt/nas/volume2/2-AI/skills/samurai/SKILL.md
+- `sdlc-review` — Review Kanban handoffs and route verified ou — /opt/data/skills/devops/sdlc-review/SKILL.md
+- `sealeap-skill-template` — Use when 写需要数据才能下判断的技能 — /opt/data/skills/meta/sealeap-skill-template/SKILL.md
+- `search-products` — >- — /opt/nas/volume2/2-AI/skills/search-products/SKILL.md
+- `self-improvement` — Captures learnings, errors, and corrections  — /opt/nas/volume2/2-AI/skills/self-improving-agent/SKILL.md
+- `shadowbot-rpa-control` — Use when you must build, control, debug, or  — /opt/nas/volume2/2-AI/skills/shadowbot-rpa-control/SKILL.md
+- `show-options` — 选择方向 · 先选方向，再继续做 — /opt/nas/volume2/2-AI/skills/show-options/SKILL.md
+- `simplify-code` — Parallel 4-agent cleanup of recent code chan — /opt/data/skills/software-development/simplify-code/SKILL.md
+- `skill-healthcheck` — 巡检 ~/.workbuddy/skills 下所有技能的装备健康度——检查 SKILL — /opt/nas/volume2/2-AI/skills/skill-healthcheck/SKILL.md
+- `skillbox-ops` — Skillbox 共享统一技能库运维技能 — /opt/nas/volume2/2-AI/skills/skillbox-ops/SKILL.md
+- `songsee` — Audio spectrograms/features (mel, chroma, MF — /opt/data/skills/media/songsee/SKILL.md
+- `songwriting-and-ai-music` — Songwriting craft and Suno AI music prompts. — /opt/data/skills/creative/songwriting-and-ai-music/SKILL.md
+- `source-claim-verification` — Use when 外部来源提到某项目、排名、许可证或数据，需回一手 API 核实 — /opt/data/skills/meta/source-claim-verification/SKILL.md
+- `spec-first` — 明确需求 · 先问清需求，再开始干 — /opt/nas/volume2/2-AI/skills/spec-first/SKILL.md
+- `spike` — Throwaway experiments to validate an idea be — /opt/data/skills/software-development/spike/SKILL.md
+- `task-observer` — > — /opt/nas/volume2/2-AI/skills/task-observer/SKILL.md
+- `tdd` — Test-driven development with red-green-refac — /opt/nas/volume2/2-AI/skills/tdd/SKILL.md
+- `teams-meeting-pipeline` — Teams meeting summaries, job replay, Graph s — /opt/data/skills/productivity/teams-meeting-pipeline/SKILL.md
+- `test-driven-development` — TDD: enforce RED-GREEN-REFACTOR, tests befor — /opt/data/skills/software-development/test-driven-development/SKILL.md
+- `third-party-repo-vetting` — Use when vetting or adopting third-party rep — /opt/data/skills/research/third-party-repo-vetting/SKILL.md
+- `tiangong-skill` — 天工.skill(Tiangong Skill)智能体设计师 — /opt/nas/volume2/2-AI/skills/tiangong-skill/SKILL.md
+- `ur-router` — 自动分工 · 判断任务，再自动分工 — /opt/nas/volume2/2-AI/skills/ur-router/SKILL.md
+- `vercel-react-best-practices` — React and Next.js performance optimization g — /opt/nas/volume2/2-AI/skills/vercel-react-best-practices/SKILL.md
+- `video-downloader` — 短视频下载器 — 支持抖音、小红书、快手、视频号、B站、YouTube、Instagra — /opt/nas/volume2/2-AI/skills/video-downloader/SKILL.md
+- `video-tutorial-batch-ingest` — 批量采集 B站/抖音视频教程（下载→转写→入库 Obsidian） — /opt/nas/volume2/2-AI/skills/video-tutorial-batch-ingest/SKILL.md
+- `wangjian-perspective` — | — /opt/nas/volume2/2-AI/skills/wangjian-perspective/SKILL.md
+- `wb-instance-handover-takeover` — WorkBuddy 实例交接接管 SOP — /opt/nas/volume2/2-AI/skills/wb-instance-handover-takeover/SKILL.md
+- `weekly-review-planning` — Weekly reset: commitments, stalled work, nex — /opt/data/skills/productivity/weekly-review-planning/SKILL.md
+- `windows-python-service-deploy` — >- — /opt/nas/volume2/2-AI/skills/windows-python-service-deploy/SKILL.md
+- `workbuddy-checkin` — WorkBuddy 每日积分自动签到 — /opt/nas/volume2/2-AI/skills/workbuddy-checkin/SKILL.md
+- `workbuddy-cross-machine-baseline` — 把一个已调教的 WorkBuddy 实例（skills/记忆/治理栈/mcp）作为"基线 — /opt/nas/volume2/2-AI/skills/workbuddy-cross-machine-baseline/SKILL.md
+- `workbuddy-dual-instance-sync` — 把本机新安装的另一个 WorkBuddy / WorkBuddy AI（不同 bundl — /opt/nas/volume2/2-AI/skills/workbuddy-dual-instance-sync/SKILL.md
+- `xurl` — X/Twitter via xurl CLI: raw post search, pos — /opt/data/skills/social-media/xurl/SKILL.md
+- `youtube-content` — YouTube transcripts to summaries, threads, b — /opt/data/skills/media/youtube-content/SKILL.md
+- `yuanbao` — Yuanbao (元宝) groups: @mention users, query i — /opt/nas/volume2/2-AI/skills/yuanbao/SKILL.md
+- `yuque` — Manage Yuque (语雀) knowledge base documents a — /opt/nas/volume2/2-AI/skills/yuque/SKILL.md
+- `zengming-perspective` — | — /opt/nas/volume2/2-AI/skills/zengming-perspective/SKILL.md
+- `zhang-yiming-perspective` — | — /opt/nas/volume2/2-AI/skills/zhang-yiming-perspective/SKILL.md
+- `zztest-skillbox-probe` — 探针 skill，用于验证 skillbox 共享库的自动广播能力 — /opt/nas/volume2/2-AI/skills/zztest-skillbox-probe/SKILL.md- `douyin-copy-extract__skillhub` — 抖音文案提取（frontmatter CRLF 破损，名字取目录名） — /opt/nas/volume2/2-AI/skills/douyin-copy-extract__skillhub/SKILL.md

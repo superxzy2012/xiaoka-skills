@@ -725,9 +725,19 @@
   "rioryugen/rioryugen": {
    "skip": "low",
    "ts": "2026-10-16T09:37:44"
+  },
+  "piloterr/skills": {
+   "skip": "low",
+   "ts": "2026-10-19T01:37:42"
+  },
+  "Jianing1117/jianing-skills": {
+   "stars": 328,
+   "ts": "2026-10-19T01:37:43",
+   "topic": "Skill生态",
+   "recommended": true
   }
  },
- "runs": 12,
- "last_run": "2026-10-17T09:37:39",
+ "runs": 13,
+ "last_run": "2026-10-19T01:37:43",
  "seen_ttl_days": 90
 }

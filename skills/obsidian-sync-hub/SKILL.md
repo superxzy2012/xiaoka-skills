@@ -151,7 +151,7 @@ base64 -w0 /tmp/x.md | ssh -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2 \
 | SSH git | `ssh://git@192.168.199.2:2222/anc/obsidian.git` |
 | 容器 / compose | `gitea`（`gitea/gitea:1`）；`/home/DY/gitea/docker-compose.yml` |
 | 数据（NAS 宿主） | `/home/DY/gitea/data`（`DY` 可读；宿主**无 git 命令**，git 操作走容器） |
-| 用户 / 仓库 | 只有 `anc`（admin，注册已关 `DISABLE_REGISTRATION=true`）／只有 `anc/obsidian`（**private**） |
+| 用户 / 仓库 | `anc`（admin）+ 按需建的 agent 账号（注册仍关 `DISABLE_REGISTRATION=true`，**新用户只能 admin API 建**）／`anc/obsidian`（**private**，vault 镜像）+ `anc/a2a-bus`（**public**，A2A 总线） |
 | 内容 | 整个 vault 基线：6451 文件 / 2.3GB（pack 1.4GB；大文件全在 `12-知识星球` 的 PDF/PPT/PNG，最大 15.8MB） |
 | 凭据 | NAS `/home/DY/gitea_admin.env`（600，`GITEA_URL/ADMIN/PASS/TOKEN`）——**只给路径，绝不回显** |
 
@@ -166,6 +166,48 @@ GIT_ASKPASS=<临时脚本: echo "$GITEA_PW"> git ls-remote http://anc@192.168.19
 - SSH 已注册 3 把 key（查 `sqlite3 /data/gitea/gitea.db "SELECT name,fingerprint FROM public_key;"`，容器内 `-u git` 执行）：
   `mac-jarvis-nas-tm`（`SHA256:ddagrH53Zu72Ip8bjWF3xrmVFj9cEEe2MVQFmhvqNL4`）、`xiaoka-hermes-nas-mirror`（`SHA256:k4XU6/aNe3kNH0mIKL1G8BufJ75G2u8DyIkL4qjMius`，对应本机 `/opt/data/.ssh/gitea-mirror`）、`jarvis-xf-cloud`（云端容器，`SHA256:5o9gss2BmIkh8G2X8HVdrvx7ZK+UmUu8fD1YvxkV72Q`）。
   **遇到 `Permission denied (publickey)` 先查这张表**：指纹不在表里就是 key 没注册，别怀疑 ssh 参数（远端 key 未注册时换任何参数都一样报错）。
+
+### 建仓 / 开读写账号（纯 REST API，不需要 shell，已验证）
+
+宿主 SSH 不通、进不了容器时，**Gitea 的 HTTP API 就够用**——`anc` 是 site admin。
+
+```bash
+# ① 取凭据：优先 NAS 的 /home/DY/gitea_admin.env；也可用本机 git credential store
+printf 'protocol=http\nhost=192.168.199.2:3000\n\n' | git credential fill > .cred.tmp   # 600
+# ② 写成 curl 配置，别用 -u
+printf 'user = "%s:%s"\n' "$U" "$P" > .curlrc.tmp && chmod 600 .curlrc.tmp
+
+# ③ 建空仓（auto_init:false = 不初始化 README，得到真·空仓）
+curl -s -K .curlrc.tmp -X POST http://192.168.199.2:3000/api/v1/user/repos \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"<repo>","private":false,"auto_init":false,"default_branch":"main"}'   # → 201
+
+# ④ 建用户（admin 端点；/api/v1/users 是 404）
+curl -s -K .curlrc.tmp -X POST http://192.168.199.2:3000/api/v1/admin/users \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"<u>","email":"<u>@a2a.local","password":"<随机>","must_change_password":false,"send_notify":false,"source_id":0}'  # → 201
+
+# ⑤ 授写权限（协作者，→ 204 无 body）
+curl -s -K .curlrc.tmp -X PUT http://192.168.199.2:3000/api/v1/repos/<owner>/<repo>/collaborators/<u> \
+  -H 'Content-Type: application/json' -d '{"permission":"write"}'
+```
+
+核对：`GET /api/v1/admin/users?limit=50`、`GET /api/v1/repos/<owner>/<repo>/collaborators`；
+再用新账号 `GIT_TERMINAL_PROMPT=0 git ls-remote http://<u>:<pw>@...` 实测 exit=0 才算开通。
+
+🔴 **坑**：
+- **Push-to-create 是关的**（`error: Push to create is not enabled for users.`）——别指望推一个不存在的仓来建它，必须先走 API。
+- **凭据不要写进 `curl -u user:pass`**：argv 在 `ps` 里全裸；写 600 的 `-K` 配置文件。实测同一实例上 `-u` 形态出现过 `HTTP=000`，`-K` 稳定 200——形态本身也可能触发兼容问题。
+- **凭据落 600 文件（如 `/opt/data/secrets/<repo>-creds.txt`），群聊和仓库里零明文**，永不贴群。
+  交给 **agent 账号** 时注意：飞书**机器人之间不能私聊**（`230013`），直发必然失败 ——
+  实测唯一即时路径是把每份凭据单独成段私聊给 BOSS 请他转发，或让 BOSS 在后台扩大机器人可用范围。
+  见 `feishu-bot-group-mentions` 的「私聊（p2p）发给另一个机器人」段。
+- **建 public 仓要明确告知**：总线类仓库含调度指令，公开=全网可读；能给 private 就别默认 public，至少要当场提一句让 BOSS 拍板。
+- **改私有（已建仓后补救）**：`PATCH /api/v1/repos/<owner>/<repo>` body `{"private":true}`，协作者权限不受影响。
+  **双向验证才算完**：认证 GET 看 `private=true` 且 `GET /collaborators` 仍是原班人马，再匿名 GET 同一个 repo
+  应返回 **404**（改之前是 200）。只看 PATCH 的返回码不够。
+- **`curl` 打 `HTTP=000` 不等于写操作失败**：连接被掐断时服务端可能已经处理完。写操作先做一次认证 GET
+  查真实状态，再决定要不要重试 —— 盲目重试 `POST /user/repos` 会撞 `repo already exists`，把「其实成功了」误读成失败。
 
 ### 给新 agent 注册 Gitea SSH key（已验证流程）
 

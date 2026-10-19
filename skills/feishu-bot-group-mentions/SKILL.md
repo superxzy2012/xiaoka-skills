@@ -60,6 +60,41 @@ python3 scripts/feishu_mention_probe.py --chat-info oc_xxx
 Exit code `0` = mention resolved, `3` = message sent but `mentions` empty, `1` = API error.
 Use the exit code, not the prose, when a peer agent has to gate on this.
 
+`--chat-info oc_xxx` needs no extra scope (it returned `name=` + `bot_count=` with ordinary
+message scope); only the **member list** wants `im:chat:readonly`. Use chat-info as a one-call
+sanity check that the chat_id you pulled from the log is the group you think it is.
+
+## Peer health-check ping-pong ("reply and @ me back")
+
+A peer bot pings you with an exact reply string and a demand to @ it back. The whole exchange is
+four commands, no member list, no scopes:
+
+1. `grep "Inbound group message" <gateway.log> | tail -1` → take `chat_id=` **and**
+   `sender=bot:ou_…` from that one line. When a peer @s only you, the `[Mentioned: …]` head is
+   empty, so the reply target is the **sender** id, not anything from the head.
+2. `python3 scripts/feishu_bot_whoami.py` — confirms your own `app_name`/`open_id`, so you can
+   sign the reply with the right node name instead of guessing.
+3. `python3 scripts/feishu_mention_probe.py --send <chat_id> <sender_open_id> "<exact string>"`
+4. Gate on exit code `0`; then report the outbound half only.
+
+Rules that make the difference:
+
+- **Send the requested string verbatim.** A peer gating on a fixed phrase ("回复「X 在线，双向@正常」")
+  fails on a paraphrase or an embellished version. Put the exact string in the message body; add
+  your own status detail *after* it, never inside it.
+- **The log has no name→id table, so do not try to prove *who* the sender is.** Grepping for
+  the peer's display name returns nothing; the request's own "@ me back" is the identification,
+  and the resolved `mentions[]` id on the way out is the only confirmation available. Say "sent
+  and parsed to the sender id", not "sent to 小米-codex" — unless the peer's reply closes the loop.
+- **Reply in the same chat the ping arrived in**, taken from the triggering line — not the home
+  channel and not the highest-volume `oc_` in the log.
+- **Answer in one message.** A health check wants a heartbeat, not a report; the verification
+  evidence (message_id + resolved `mentions` id) belongs in your chat reply to BOSS, not in the
+  peer's @ message.
+- **Don't claim "双向正常" until the peer replies.** "双向@正常" as the peer's scripted phrase is
+  fine to echo; as *your own* claim it needs the peer's inbound line in your log. Report
+  "outbound parsed, waiting on their half" and, if it stays silent, say so plainly.
+
 ## Judging the send response
 
 | Response | Meaning |
@@ -70,7 +105,35 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
 | `99991679` | user-identity token used on a message API → switch to `tenant_access_token` |
 | `99991672` on member list | missing `im:chat:readonly` — do **not** open a scope for this, use step-2 source 1 |
 | `230027` | missing `im:message.group_msg` (history pull); unrelated to receiving @ — leave it closed |
-| HTTP 400 + JSON body | the body still carries `code`/`msg`; read it, urllib raises before you can parse |
+| `230013` | **bot has NO availability to this user** — p2p to another *bot* is blocked by platform, not an id/scope bug; see the DM section below |
+| HTTP 400 + JSON body | the body still carries `code`/`msg`; urllib raises before you can parse |
+
+## 私聊（p2p）发给另一个机器人：平台不允许，别试
+
+`POST /open-apis/im/v1/messages?receive_id_type=open_id` 发给**另一个 bot** 的 open_id，
+即使 id 完全正确、`tenant_access_token` 有效，也一律返回：
+
+```
+HTTP 400  {"code":230013,"msg":"Bot has NO availability to this user."}
+```
+
+同一个请求发给**人类** open_id 立刻 `code:0`。所以 `230013` 不是 id 错、不是缺 scope、不是
+token 过期，而是**机器人之间默认不能私聊**（双方「机器人可用范围」里都没有对方）。
+换 token、换 id、重试都没有意义 —— 别把它当权限问题去开 scope。
+
+**一次调用分清是哪种失败**：先用同一个 token 给 BOSS/人类发一条探测；`code:0` 说明整条链路
+（token、接口、代码）都是好的，那目标 bot 的 `230013` 就坐实是平台限制，立刻改道。
+
+凭据/敏感信息要交给另一个 agent 时，只有三条路：
+
+| 路径 | 做法 | 代价 |
+|---|---|---|
+| **BOSS 转发（默认）** | 每份内容单独成段私聊给人类 owner，段首写「第 N 份 → 发给谁」，请他逐段转发 | 需要人配合，但立即可用 |
+| **扩大可用范围** | 飞书管理后台 → 应用 → 机器人 → 可用范围 → 添加这些用户；之后可直发 | 一次性配置，永久解决 |
+| 群里发加密串 | 不推荐：群历史持久、所有 bot 都看得到 | 等于没加密 |
+
+🔴 发不出去是平台限制，**不是可以降低安全要求的理由** —— 绝不要因为 DM 失败就退化成群里贴明文。
+如实报 `230013` 原文 + 已改道哪条路 + 请谁配合，比偷偷贴群强。
 
 ## Where open_ids come from, in order of cost
 
@@ -85,6 +148,8 @@ Use the exit code, not the prose, when a peer agent has to gate on this.
    `grep "Inbound group message" <gateway.log> | tail -1` then read the `[Mentioned: ...]`
    prefix. Ids lifted from a real inbound message often resolve on the way out, **but still
    confirm via `mentions[]`** — resolution, not plausibility, is the proof.
+   When the message @-mentioned nobody but you, the head is empty and the id you want is the
+   `sender=bot:ou_…` field of that same line (that is the peer to @ back).
 2. **`GET /open-apis/im/v1/chats/<chat_id>/members?member_id_type=open_id`** with the same
    app identity you send from. Needs `im:chat:readonly`.
 3. The Feishu console's group-member page, as a last resort for cross-app ids.

@@ -405,6 +405,30 @@ python nas_cdp.py bilibili <url>
   标题「每月白嫖74亿token的开源项目…」、作者「亚莱加德」、36.9万赞、`video_src` 拿到 `.mp4`。
 - B站 `https://www.bilibili.com/video/BV1GJ411x7h7` → h1/UP主/播放量齐全，`has_video=true`。
 
+### 5.7 又一例：Obsidian 中心化知识库 MCP（2026-10-18 部署）
+
+给蜂群（云端 Queen/本地 8 agent/远端 Workbuddy）一份共享 Obsidian 集体记忆。选型 **`obsidian-ai-miniserver`**（PyPI 0.2.1，`whogben/obsidian_ai_miniserver`，MIT；纯 headless 直读 vault 文件夹，**不需 Obsidian Sync 付费账号**，同时起 streamable HTTP MCP + REST/OpenAPI + Web UI）。
+
+- **没有官方预构建镜像**，且 NAS 直连 PyPI 超时（exit 124）→ 自建镜像，Dockerfile 里 `pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple`，基于本地已有的 `python:3.12-slim`（免拉基础镜像，build ~30s）。
+- 🔴 **README 与 PyPI 稳定版 CLI 不符**：README/main 用 `start --vault name:path`（多 vault），但 0.2.1 的 `start` **只收单个位置参数** `[vault_path]`，传 `--vault` 直接报 `No such option` 并 crashloop。要多 vault → **跑多个容器实例**，各挂一个目录（本次 hive + skillbox 两实例）。
+- 端口：容器内 MCP **8716**（端点 `/mcp`，streamable HTTP）、REST/Web **8747**（`/api`、`/web`、`/api/openapi.json`）。宿主按规格映射 3456→8716(hive MCP)、3457→8747(hive REST)、3458/3459(skillbox)。**只绑 LAN IP** `192.168.199.2:`，不暴露公网。
+- 🔴 **MCP 工具只有一个 `obsidian`，入参是包在 `arguments.request` 里的 JSON 字符串（discriminated union），不是对象**。先 `tools/list` 看 `inputSchema.properties.request.$defs`，请求体用 `kind` 路由：`list_files/read_text/search_files/write_text/append_text/replace_text/move_file/get_vault_info/batch` + 管理类。直接传对象 → `Input should be a valid string`；字段名错（如 `content`/`action`）→ pydantic 校验错。search 支持正则、中文正常。
+- 🔴 **鉴权**：MCP `initialize` 握手本身不校验 token（无 token 也能建 session），但**所有数据类工具调用无 `Authorization: Bearer` 必返 `{"kind":"error","message":"Invalid token"}`**。所以 `/api/openapi.json` 无 token 返 200 是正常的（文档公开），别误判成"鉴权没生效"。token 用 `secrets.token_hex(32)`，走 compose `.env`（600）+ `OBS_AI_MS_ADMIN_TOKEN`。
+- 🔴 **必须 `user: "1000:10"`（vault 属主 superxzy:admin），不能让容器以 root 跑**：root 容器写出来的笔记宿主属主 `0:0 664`，其他 uid 的 agent 只能读不能改删，违背"多 agent 共享写"。加了非 root 后要再 `chown` 两个目录给 1000:10，否则 PermissionError：①挂载的 config 卷；②**vault 内的 `.obsidian/`**（服务要在里面写 `obsidian_ai_miniserver.json`；首次 root 跑还会在 vault/skills 各建一个 root:root 的 `.obsidian/`，chown 之，别动其他笔记）。
+- 数据已在 USB 盘：`/volume2/2-AI` 与 `/mnt/@usb/sde1/2-AI` 是**同一个 ext4 设备**（`stat -c %d` 设备号相同），docker 挂载直接用宿主路径 `/mnt/@usb/sde1/2-AI/obsidian_vault`（7933 篇）和 `.../skills`（351 技能；其中 6 个悬空软链会让 `list_files` 报个别 `No such file`，不影响 search，可忽略或清理）。
+- 交付：容器 `obsidian-mcp`(hive) + `skillbox-mcp`，均 healthy，mem 640m/512m，compose 在 `/mnt/@usb/sde1/2-AI/obsidian-mcp/`。
+- **Hermes 客户端配置**（键名是 `mcp_servers`，HTTP transport 用 `url`+`headers`，不是 stdio 的 command）：
+  ```yaml
+  mcp_servers:
+    obsidian_hive:
+      url: "http://192.168.199.2:3456/mcp"
+      headers: { Authorization: "Bearer <token>" }
+    skillbox:
+      url: "http://192.168.199.2:3458/mcp"
+      headers: { Authorization: "Bearer <token>" }
+  ```
+  改完重启 Hermes；工具注册名 `mcp_obsidian_hive_obsidian` 等。验证 MCP 用原生 `initialize`→`notifications/initialized`→`tools/list` 三步握手（Accept 要带 `text/event-stream`，session 走响应头 `Mcp-Session-Id`，SSE 体取 `data:` 行）。
+
 ## 六、汇报给 BOSS 时
 
 结论先行 + 表格：URL / 端口 / 数据目录 / 镜像 tag / 状态。
