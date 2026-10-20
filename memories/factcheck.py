@@ -118,7 +118,8 @@ def extract_repos(text: str) -> list[str]:
 #   15-小卡工作区/开源源码   ← 中文本地路径
 FAKE_EXACT = {"cloud/turbo", "FACT/ESTIMATE", "TBD/NA", "N/A",
               "owner/repo", "owner", "repo", "your/repo", "your-username/repo",
-              "memories/factcheck.py", "skills/factcheck.py"}
+              "memories/factcheck.py", "skills/factcheck.py",
+              "JSON/CSV", "CSV/JSON", "JSON/MD", "API/SDK", "MD/PDF", "YAML/JSON"}
 FAKE_PREFIX = ("raw.githubusercontent.com", "githubusercontent.com",
                "localhost", "127.0.0.1", "example.com",
                "opt/", "home/", "var/", "usr/", "tmp/")

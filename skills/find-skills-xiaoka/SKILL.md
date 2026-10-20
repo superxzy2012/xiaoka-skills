@@ -74,6 +74,26 @@ OCR 把 `1.4k` 和 `60` 读串了。**star/forks/watchers 三个字段必须分�
 **search API 的坑**：`gh api -X GET search/repositories -f q="..."` 里的中文/长 query 必须能被 GitHub 接受，
 返回空时先换英文原文再试；`-f` 不加 `-X GET` 会变 POST（`orgs/X/repos` 会报 403 admin access）。
 
+### 2.4.1 短视频吹的和仓库实际的不一致（必查三项）
+
+口播稿是营销文案，**默认不信数字与范围，一律回源**：
+
+1. **「支持 N 种工具」要数表格**。实例：口播说「十种主流 AI 工具」，README 的 supported-agents 表格只有 6 个。
+   数 README 里的 `<td>` / 列表项，不要采信口播。
+2. **视频常演示的是上一代架构**。先搜 README 里的 `New:` / `Breaking` / `legacy` / `v0.x` 字样，
+   再看有没有 `legacy` 分支或旧 tag。实例：视频讲「Mac 跑 UxPlay + Python server」，
+   而 README 开头写着「the computer is gone」——现在板子自己当接收器，旧实现留在 `legacy` 分支。
+   笔记里必须标明「视频讲的是旧架构，当前版本已改为 X」，否则读者照着装会懵。
+3. **star/fork 只认 API**，画面 OCR 与口播都会过时或读串（见上一节的 22.3k 实例）。
+
+### 2.4.2 许可证判定的两个假警报（`scripts/resolve_license.py` 已修）
+
+- **`All rights reserved` / `Copyright (C) 20XX X` 不是「专有」**。这类版权声明与 MIT/Apache 完全兼容，
+  大厂开源项目（如腾讯系）几乎都在 MIT 正文前加一句。判专有只认 `proprietary` / `confidential`。
+- **`NOASSERTION` 不是「冲突」，是「API 认不出」**。GitHub licensee 遇到自定义措辞就返回 NOASSERTION，
+  必须回源读 LICENSE 正文自行判定，输出 `note` 而非 `conflict`。
+- 改这两条规则后必须跑 `--selftest`（当前 12/12），规则顺序敏感：禁商用/专有必须排在 MIT/CC0 之前。
+
 ### 2.5 官方文档优先于猜 URL（2026-10-03 实战）
 
 **实例**：配mihomo 规则集时，我按记忆猜 `Loyalsoldier/geoip/release/text/cn-domain.mrs` —— 全404。查 mihomo 官方文档 `wiki.metacubex.one` 才找到真实地址（MetaCubeX 自己的 `meta-rules-dat/meta/geo/geosite/cn.mrs`）。

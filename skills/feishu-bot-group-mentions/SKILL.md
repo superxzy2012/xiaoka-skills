@@ -124,13 +124,16 @@ token 过期，而是**机器人之间默认不能私聊**（双方「机器人�
 **一次调用分清是哪种失败**：先用同一个 token 给 BOSS/人类发一条探测；`code:0` 说明整条链路
 （token、接口、代码）都是好的，那目标 bot 的 `230013` 就坐实是平台限制，立刻改道。
 
-凭据/敏感信息要交给另一个 agent 时，只有三条路：
+凭据/敏感信息要交给另一个 agent 时，只有四条路：
 
 | 路径 | 做法 | 代价 |
 |---|---|---|
-| **BOSS 转发（默认）** | 每份内容单独成段私聊给人类 owner，段首写「第 N 份 → 发给谁」，请他逐段转发 | 需要人配合，但立即可用 |
+| **落盘到对方可读路径（同主机首选）** | 对方在同一台机器/同一宿主上跑容器时，写一个 `600` 的 env 文件到它挂载的 home（如 `/opt/data/secrets/x.env`），根本不经飞书 | 零泄露、零人工；需先确认容器身份与挂载点（见 `a2a-bus-onboarding`） |
+| **BOSS 转发** | 每份内容单独成段私聊给人类 owner，段首写「第 N 份 → 发给谁」，请他逐段转发 | 需要人配合，但立即可用 |
 | **扩大可用范围** | 飞书管理后台 → 应用 → 机器人 → 可用范围 → 添加这些用户；之后可直发 | 一次性配置，永久解决 |
 | 群里发加密串 | 不推荐：群历史持久、所有 bot 都看得到 | 等于没加密 |
+
+同一台机器上的蜂群节点（NAS 容器、宿主进程）优先走第一条：飞书只是聊天通道，不是凭据通道。
 
 🔴 发不出去是平台限制，**不是可以降低安全要求的理由** —— 绝不要因为 DM 失败就退化成群里贴明文。
 如实报 `230013` 原文 + 已改道哪条路 + 请谁配合，比偷偷贴群强。
@@ -214,6 +217,9 @@ them, print `msg_type` + body, and pull attachments with
   Ozon / 美客多 / 亚马逊 groups documented in `feishu-13bots-tester`) are a different set of
   apps from the ops/persona bots that talk in the management group; ids and group ids do not
   cross over. Resolve the fleet you are actually in from live evidence.
+- **不要把「凭据交给了对方」等同于「发了一条消息」。** 机器人之间私聊被平台封死，真正的交付是
+  对方能从它自己的文件系统里读到，并且你能用它的身份验证（见 `a2a-bus-onboarding` 第 5 步）。
+  消息发出去了但对方读不到文件，是没交付。
 - **群文件 (group files) are not readable by the bot's app — route around them.** The chat
   history pull needs `im:message.group_msg` (`230027`) and the drive endpoints need `drive:*`
   (`99991672`); the web client keeps a file's token in app state rather than the DOM, so DOM

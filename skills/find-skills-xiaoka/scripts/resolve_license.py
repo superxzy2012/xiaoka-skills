@@ -33,7 +33,7 @@ ENV = {**os.environ, "HOME": "/opt/data/home", "GH_CONFIG_DIR": "/opt/data/home/
 NOCOMMERCIAL = r"(?:licen[cs]ed|licen[cs]e|use|usage|distribution|redistribution|permission)[\s\S]{0,80}?(?:non-?commercial|not\s+for\s+commercial)|(?:non-?commercial)[\s\S]{0,40}?(?:use|licen[cs]e|distribution)|禁止商用|不得用于商业"
 RULES = [
     (NOCOMMERCIAL, "非商用", "no-commercial"),
-    (r"all rights reserved|proprietary and confidential|is proprietary", "专有", "proprietary"),
+    (r"proprietary and confidential|is proprietary|proprietary software", "专有", "proprietary"),
     (r"AFFERO GENERAL PUBLIC LICENSE|GNU AFFERO", "AGPL-3.0", "copyleft-strong"),
     (r"SERVER PUBLIC LICENSE", "SSPL-1.0", "copyleft-strong"),
     (r"BUSINESS SOURCE LICENSE|BUSL", "BUSL-1.1", "copyleft-source"),
@@ -115,12 +115,12 @@ def resolve(repo):
     out["resolved"] = spdx
     out["friendliness"] = friend
     out["needs_review"] = spdx in (None, "非商用", "专有") or (friend == "copyleft-strong")
-    # 4) 一致性：API 与回源冲突 = 警报
+    # 4) 一致性：API 与回源冲突 = 警报（NOASSERTION 只是 API 认不出，不算冲突）
     api = out["api_license"]
-    if api and spdx and api != spdx:
-        out["conflict"] = f"API={api} vs 回源={spdx}"
-    elif api == "NOASSERTION" and spdx:
+    if api == "NOASSERTION" and spdx:
         out["note"] = "API 无法识别（NOASSERTION），回源已判定"
+    elif api and spdx and api != spdx:
+        out["conflict"] = f"API={api} vs 回源={spdx}"
     return out
 
 
