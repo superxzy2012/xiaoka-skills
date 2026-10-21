@@ -81,6 +81,26 @@ for c in sel:
   ```
 - **中文站 SPA 要 `time.sleep` + 放视口**，`networkidle` 基本等不到。
 - **`browser_vault_*` 只对 Hermes 自管浏览器生效**；CDP 接的 Chrome 不走 vault，登录由 BOSS 自己在 Windows 上做。
+- **裸 CDP 封装里 `new_tab()` 返回的是 session id 字符串，不是标签对象**（`AttributeError: 'str' object has no attribute 'eval'`）。
+  `eval_js` / `call` / `goto` 都在 client 对象上：
+  ```python
+  with cdp.CDP(cdp.CDP_URL) as c:
+      sid = c.new_tab(url, background=True)   # 只是 id
+      c.eval_js("location.href")              # 在 client 上调，不传 sid
+  ```
+  开标签必须建时就传 `background=True`，事后 `bringToFront` 补救会抢 BOSS 焦点。
+- **抓二维码/画布类元素别截整页**：先取 bounding box，再用 `Page.captureScreenshot` 的 `clip` + `scale` 裁切，
+  否则二维码在 1280×900 全屏里只有指甲盖大，扫不出来。
+  ```python
+  c.call("Emulation.setDeviceMetricsOverride",
+         {"width": 1280, "height": 900, "deviceScaleFactor": 2, "mobile": False})
+  box = c.eval_js("(()=>{const r=[...document.querySelectorAll('canvas')]"
+                  ".map(e=>e.getBoundingClientRect()).filter(r=>r.width>120)"
+                  ".sort((a,b)=>b.width-a.width)[0];return r&&{x:r.x,y:r.y,w:r.width,h:r.height}})()")
+  c.call("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": True,
+         "clip": {"x": box["x"]-12, "y": box["y"]-12,
+                  "width": box["w"]+24, "height": box["h"]+24, "scale": 3}})
+  ```
 
 ## 权限与红线
 - 支付/下单前必须 BOSS 明确确认，CDP 也不例外。

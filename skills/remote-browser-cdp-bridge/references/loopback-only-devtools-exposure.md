@@ -81,6 +81,31 @@ Keep remote diagnostics read-only and idempotent: probe → collect → print pl
 have a remote script install or reconfigure anything — that needs admin anyway, and a failed
 write leaves a messier remote host than the one you were sent to fix.
 
+## No admin on the browser host: `ssh -L` instead of `netsh portproxy`
+
+`netsh interface portproxy add` and `New-NetFirewallRule` both need an elevated shell. When the
+automation account on the browser host is unprivileged, forward the loopback port through the SSH
+session you already have — nothing is changed or persisted on that host:
+
+```bash
+ssh -i KEY -o ExitOnForwardFailure=yes -f -N -L 19224:127.0.0.1:9223 user@browser-host
+curl -s http://127.0.0.1:19224/json/version    # must return JSON before anything else
+```
+
+`-f -N` backgrounds the tunnel and runs no remote command; `ExitOnForwardFailure=yes` fails
+immediately when the backing port has no listener instead of leaving a silent forward. The
+returned `webSocketDebuggerUrl` still names the browser host's own loopback, so rewrite it to the
+**tunnel endpoint**, not to the host's LAN address:
+
+```python
+ws = ver["webSocketDebuggerUrl"].replace("127.0.0.1:9223", "127.0.0.1:19224")
+```
+
+Choose a fresh local port per attempt and leave stale tunnels alone. **Never `pkill -f
+"<port>:127.0.0.1:<port>"` to clear one** — that pattern matches the command line you are
+currently running, so the shell kills itself: exit `-15`, no output, indistinguishable from a
+timeout.
+
 ## Windows relay (verified shape)
 
 ```powershell

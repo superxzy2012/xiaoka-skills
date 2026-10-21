@@ -48,7 +48,9 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
    When the debug port binds to loopback only, expose it with a userspace TCP relay rather than
    asking the user to relaunch the browser with a different bind flag — current Chromium
    releases ignore `--remote-debugging-address` and bind `127.0.0.1` regardless. See
-   `references/loopback-only-devtools-exposure.md` for the Windows relay recipe.
+   `references/loopback-only-devtools-exposure.md` for the Windows relay recipe. If the automation
+   account on that host is **not** an administrator, skip the relay and use `ssh -L
+   <local>:127.0.0.1:<port>` (same reference): `portproxy` and firewall rules both need elevation.
 
    Verify the bind from the host, not from the browser's own machine. `curl http://127.0.0.1:PORT`
    succeeding locally proves nothing about reachability — it is the loopback path working. The
@@ -123,7 +125,7 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
   `--user-data-dir` may be bound to the original install's encryption key, so the clone boots
   logged out. Have the user sign in once *inside the dedicated automation profile*; that login
   then persists across restarts. Do not loop on re-copying the profile.
-- **Guest vs real login**: a browser can hold dozens of cookies and still be a guest. Always probe an authed endpoint before promising a flow works.
+- **Guest vs real login**: a browser can hold dozens of cookies and still be a guest. Always probe an authed endpoint before promising a flow works. A text scan is the worst form of this check: searching the page for `Sign In`/`Dashboard` returns a logged-in verdict on a **localized guest page** (`登录`), so classify by an authed endpoint's status code, never by English keywords.
 - **When a page read comes back empty, escalate to a trivially-true probe before blaming your selector.** `document.title` and `location.href` returning `None`/empty while your careful DOM query also returns nothing means the **session is dead**, not that the selector is wrong. Chasing selectors against a dead session burns the whole loop — one navigation per item at 10s each turns a diagnosable outage into a silent all-items-failed batch. Probe once at script start and exit immediately with a clear message, so the failure costs seconds instead of the run.
 - **`AttributeError: module has no attribute 'goto'` is a wrong API call, not a dead bridge.** Read the helper's actual surface before using it — helpers usually expose methods on an instance (`CDP().goto(...)`), so a module-level `cdp.goto(...)` fails with an error that looks like a connectivity problem. Confirm with the same trivially-true probe: if `document.title` works, the bridge is fine and the bug is in your call. Tell these two apart early, because "the bridge is down" sends the user to reboot a browser that was healthy all along.
 - **Preflight the bridge before an expensive per-item loop.** A batch that navigates once per item should assert connectivity first and bail out in seconds if it fails. Otherwise a bridge outage spends the entire batch's wall-clock budget producing one uniform failure row per item, which reads as "the site rejected everything" rather than "nothing ever connected."
@@ -133,7 +135,22 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 - **A panel that bounces to `#/login/…` loads its privileged routes only after auth.** The bundle you can fetch while logged out holds just the public API surface; absence of a container/service endpoint proves nothing about whether one exists. See `references/cross-host-admin-grants.md` for the boundary sweep and the one-step handoff.
 - **`location.hash` ending in `#/login/` is the verdict, not `localStorage`.** An `appKey` in storage is written before login finishes and reads like a live session.
 - **Key material handed to a user must come from the private key.** A `known_hosts` line is indistinguishable from a public key and pastes cleanly while authorizing nothing.
+- **`'Page.captureScreenshot' wasn't found` means wrong session, not a missing method.** Page/DOM
+  domain commands have to ride the tab's attached session; `new_tab()` returns a **targetId**, and
+  passing that as a session id fails with the same "method not found" wording. In the bundled
+  client the live session is `c._sid`: `c.call("Page.captureScreenshot", {"format": "png"}, c._sid)`.
+  The reply is wrapped — the image is `r["result"]["data"]` (base64 PNG), not `r["data"]`; keying on
+  the unwrapped shape reads as "capture failed" while the call actually succeeded. `Target.createTarget`
+  replies `{"targetId": …}`: passing the whole result dict where a `targetId` is expected fails with
+  `-32602 Invalid parameters … Failed to deserialize params.targetId - string value expected`.
+  Let the page
+  settle a few seconds after navigate, and sanity-check the file size: a blank page still returns
+  a perfectly valid PNG.
 - **`connect_over_cdp` `.pages` AttributeError**: pages are on `b.contexts[0]`, not the Browser.
+- **`pkill -f "<localport>:127.0.0.1:<port>"` kills the shell that runs it.** The pattern matches the
+  command line of the very invocation, so "restart the tunnel" ends the whole call (`exit -15`) and
+  leaves the tunnel state unknown. Track the PID (`$!`) or use `-o ControlMaster`/`ControlPath` and
+  `ssh -O exit`; or start the replacement on a fresh local port and let the stale one die on its own.
 - **Never steal the user's foreground.** The browser being driven is their daily driver, so every
   action has to be invisible to them: pass `background: true` when creating a target (the parameter
   has to be present at `Target.createTarget` time — activating afterwards does not undo the

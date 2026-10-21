@@ -16,7 +16,7 @@
 | 节点 | open_id (星期五视角) | 角色 |
 |------|---------------------|------|
 | 星期五-新Hermes (QUEEN/我) | ou_cec7da8fb7c87ba06dcb4b2110c9ede1 | 云端调度/通信枢纽 |
-| 小豆-新Hermes | ou_3501ce1fe1ab90a9c94fc232db1927dd | Hermes 节点 |
+| 小豆-新Hermes | ou_3501ce1fe1ab90a9c94fc232db1927dd（星期五视角）／ou_4b8b06fc47ac1a6372bae51f01aebbd4（小卡视角） | 小豆-新Hermes = **另一朵云的全新 VPS（IP 未知，待小豆自报）**，Hermes default profile、工作区 `/home/agentuser/A2A`；**旧 Mac 端小豆已停用作废**（旧址 `/Volumes/2-AI/A2A`、`launchd ai.hermes.gateway`），两者无关。⚠️ `100.66.1.6` 是**星期五/Queen** 的云端 VM，不是小豆，配置/流量别串台 |
 | 小米-codex (蜂王) | ou_fc604d3323ba024e2400db900df3a008 | Mac 端编排/SRE |
 | 小丽-workbuddy | ou_a894c95f3540f53997cf14292a664db7 | 美客多业务线 |
 | 小丽2号-workbuddy国际版 | ou_2ae7b9213c69801aa7dcdf8bf05f70e0 | Mac 国际版 |

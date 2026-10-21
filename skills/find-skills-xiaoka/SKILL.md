@@ -201,6 +201,36 @@ git 默认会 HTTP/2（报 `Error in the HTTP2 framing`），已全局设 `http.
 3. **保留出处**：拷贝的外部文件放到 `references/oss-<repo>/`，
    连同 LICENSE 和 `UPSTREAM-*.md` 一起留，别混进自己的产物。
 
+## 把第三方技能包装进 Hermes（并铺到蜂群）
+
+仓库自带 installer 时**用它**，别自己搬文件 —— 它会同时处理分类目录、辅助脚本和卸载路径。
+
+```bash
+# 1) 取源码。本机 git clone 会超时，npx -y github:owner/repo 会被 npm 的 git 依赖拦截
+gh api repos/<owner>/<repo>/tarball/main > /tmp/r.tgz
+mkdir -p /tmp/r && tar xzf /tmp/r.tgz -C /tmp/r --strip-components=1
+
+# 2) 先 dry-run 看它要写哪儿，再真装（落点 /opt/data/skills/<category>/<skill>/）
+cd /tmp/r && node installer/install.js --only hermes --dry-run
+node installer/install.js --only hermes
+```
+
+- **`--only <agent>` 是必须的**：installer 默认遍历 30+ 个 agent 的配置目录，没装的也去建，容易留下垃圾。
+- 装完用 `skills_list` 确认注册。**技能是每次会话扫盘加载：本机立即生效，云端 gateway 要重启。**
+- **验证是真跑一次，不是看文件在不在**：同一道题普通模式 / 技能模式各跑一遍，比字数和事实完整度。
+  实测某压缩型技能 256 字 → 150 字（−41%）且事实不丢，才算生效；只 `ls` 到目录就报「已装」是假验收。
+
+**铺到蜂群**：技能在各节点是**实体拷贝，不是软链**，共享库改了不会自动到别人家 —— 每个节点都要显式 cp：
+
+| 节点 | 落点 | 备注 |
+|---|---|---|
+| 本机（小卡） | `/opt/data/skills/<cat>/` | installer 默认落这里 |
+| 共享库 | `/opt/nas/volume2/2-AI/skills/` | 扁平结构，无分类子目录 |
+| 云端星期五 | `~/.hermes/skills/productivity/` | 改完 `systemctl --user restart hermes-gateway` |
+| NAS 贾维斯容器 | `docker exec hermes-ancgm` 内 `/opt/data/skills/` | 宿主路径 `/volume2/hermes/ancgm-home/skills`；容器能看到 `/opt/nas/volume2` |
+
+`scripts/distribute_skill.sh <skill...>` 一条命令做完上面四步。铺完在管理群发一条通知（Feishu API + `/opt/data/.env` 凭据），**用返回的 `message_id` 回读确认**，`code=0` 只代表接口收下了。
+
 ## 决策规则
 
 ```

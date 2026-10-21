@@ -28,6 +28,22 @@ really cloned and pushed, and the secret sits where the target can read it".
 
 ## Procedure
 
+### 0.0 先钉住对方是哪台机器上的哪个实例（同名 ≠ 同实例）
+
+给一个「名字」发凭据之前，先证明这个名字现在指向哪台机器。同一个 agent 名可能已经搬到新主机、换了平台
+重装，旧实例停用后其 IP / 根路径 / 凭据 / 端口全部作废 —— 按旧记录推断，会把凭据投到一台已经没有这个
+agent 的机器上。
+
+- **身份从对方自己身上取，不从历史记录取**：读它宿主上的 `~/.hermes/.env` 里 `FEISHU_APP_ID`、
+  `~/.hermes/profiles/` 列表、`systemctl --user status hermes-gateway`。app_id 才是「这台机器是谁」的指纹；
+  主机名、组网 IP、以及「云端 Hermes」这类描述都不唯一。
+- **一台机器上只有一个网关实例**：某台已知机器上只跑着一个 app_id，那它就不是另一个 agent 的宿主，
+  不要在那台上继续翻 profile 找「另一个人的目录」。
+- **在共享 agent 卡里写「身份沿革」**：`A2A/agents/<id>.md` 顶部固定一段 —— 新实例生效时间、旧实例已停用、
+  「与 X 是不同机器/不同云，路径与凭据不可互套」。其他 agent 读的是这张卡，不是你的记忆。
+- **投递顺序固定**：通道（SSH/组网）→ 对方自己的 A2A 根路径 → 600 凭据文件 → 对方本机真跑一次
+  clone/push 验收。新实例的 A2A 根是它自己新建的，不要套用任何既有路径。
+
 ### 0. Get an admin identity that actually works
 
 Admin credentials live in the git credential store, one URL per line
@@ -101,6 +117,9 @@ If the target runs as a container on this host, deliver through its mounted home
 2. Confirm **which** agent it is before writing: env often has no `app_id`, but the home holds a
    persona file (`SOUL.md` / `memories/AGENT_SOUL.md`) whose self-description names the node.
    `grep -rlm1 '<节点名>' <home>/SOUL.md <home>/memories/*.md`.
+   Known map on this NAS: `hermes` → `/volume2/hermes/data` (小卡), `hermes-ancgm` →
+   `/volume2/hermes/ancgm-home` (贾维斯). Container names are not agent names — never infer the
+   agent from the container name alone.
 3. Write from your own container via the shared NAS mount (`/opt/nas/volume2/<home>/secrets/`).
    `write_file` refuses `/opt/nas/**` — use `python3` (it also lets you `chmod 600` in the same
    breath).
@@ -115,8 +134,12 @@ If the target runs as a container on this host, deliver through its mounted home
 - Receipt: `receipts/<topic>.md` committed to `main` of the bus, then re-read it through
   `GET /api/v1/repos/.../contents/<path>` (expect HTTP 200 + a byte size). Push can be rejected
   by the mirror's periodic double-push cycle — retry with `git pull --rebase` before concluding.
-- State which onboarding route you chose when more than one was offered (account vs deploy key;
-  git channel vs file mirror), and why the other was deferred.
+- State which onboarding route you chose when more than one was offered, and why the other was
+deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env file where the target
+  reads it; (2) **deploy key** — the target has no mount and no DM; (3) password over a human-relayed
+  private channel — last resort. Pick (2) early when (1) is unavailable: only a *public* key has to
+  cross the wire, it can be posted in the group without leaking anything, and it is revocable per
+  repo without rotating an account password. See `nas-gitea-ops` §7 for the attach procedure.
 
 ## Pitfalls
 
@@ -141,6 +164,17 @@ If the target runs as a container on this host, deliver through its mounted home
 7. **Never claim the container-side end-to-end test passed when only the host-side one did.**
    "Account pushes from NAS, file readable in container, git present" is three verified facts and
    one honest gap — say it that way.
+8. **"The peer cannot reach the NAS" is a claim to measure, not inherit.** Before redesigning the
+   delivery path around it, probe the port from the peer's own network (`nc -z <mesh-ip> 2222`, or
+   read the SSH banner). A mesh route that answers on 2222/3000 changes the answer from "relay the
+   password by hand" to "attach a deploy key and let them clone".
+9. **A provisioning run that aborts mid-script leaves live state.** `set -e` stops at the first bad
+   statement, after earlier writes have already committed — a half-attached key or an undeleted token
+   looks exactly like a clean run from the outside. End the run by asserting the end state (row counts
+   back to baseline) and re-running the cleanup if it does not match.
+10. **同名 ≠ 同实例。** 一个 agent 从旧主机搬到新云端后，旧主机的 IP、A2A 根、凭据、端口全部作废；
+    按旧记录推断会把凭据投到已经没有这个 agent 的机器上，对方只会回「我这里没这个目录」。先读对方宿主上的
+    `FEISHU_APP_ID` 确认身份，再谈路径（见 §0.0）。
 
 ## Credential hygiene (non-negotiable)
 

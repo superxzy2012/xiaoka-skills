@@ -28,6 +28,11 @@ sudo -n docker exec owjdxb sh -c "ps aux | grep -o 'peerid [A-Z0-9]*' | head -1"
 
 **为什么必须这样查**：组网 IP 会重排（历史上有过 .5→.7 变动），peerid 是稳定的。对方报告里写「NAS peer = 076ED239...」而日志显示该 peer 是 `super`（Windows），就会导致云端一直打 Windows 的端口，而 Windows 上没有目标服务 —— 症状恰好是「TCP 建连但零字节」，看起来像隧道坏了，其实连错机器。
 
+**认机器不认名字。** agent 名（小豆/星期五…）会在迁移后指向完全不同的主机：同名旧实例停用、新实例在另一朵云，
+旧 IP 与旧路径一并作废。判定某台机器上跑的是谁，读它自己的 `~/.hermes/.env` 的 `FEISHU_APP_ID` 和
+`~/.hermes/profiles/` 列表，不要按主机名或「云端 Hermes」这种描述去猜。一台机器上只起了一个网关实例时，
+直接排除「另一个 agent 也在这台」的假设 —— 在那台上翻 profile 找别人的目录是白花时间。
+
 ## 铁律 1：宿主网络只能借 `--net=host` 容器看，`sudo -n ip` 的输出是假的
 
 **`sudo -n` 只免密 `/usr/bin/docker`，对 `ip` / `ss` / `iptables` 一律静默失败返回空输出。**
@@ -76,6 +81,17 @@ done; rm -f /tmp/b
 | `16880 → 404` 但业务端口 `000` | 打错机器（那台上没这个服务），不是链路问题 |
 
 配合铁律 0 的权威表一起看：`100.66.1.5:16880` 有应答 = 那台是 Windows super，不是 NAS。
+
+### 服务端日志 `mapping succ` 后 `sent 0 recv 0 err timeout` = 对端会话死，不是本机服务坏
+
+`NodeBabyLinkService.log` 里同一条隧道 `mapping succ` 之后紧跟 `sent 0 recv 0 err timeout`，
+**且对端多个端口（22 与 16880 之类）同时如此**，判读是那台机器的 nblink 客户端会话已死：
+relay 建了映射却一个字节都没收到。此时白名单、版本号、端口映射、本机服务全是无辜的，
+别在那四项上继续折腾——让对端彻底重启客户端后重测。
+
+只有**单个端口**超时、其他端口正常时，才轮到怀疑本机 loopback 到该端口被挡
+（NAS 上 `127.0.0.1:22` 被静默 DROP 就是这种形态，修法见
+`references/ssh-over-mesh-22-blocked.md`）。
 
 ### `btlBW 0` 不等于隧道坏
 
@@ -126,6 +142,19 @@ sudo -n docker ps -a --format '{{.Names}} | {{.Status}} | {{.Ports}}' | grep -iE
 本机 200 = 服务没问题，故障在链路；本机也 000 = 服务挂了，才轮到重启容器。
 **顺序不能反** —— 先怀疑链路会白查一轮，先怀疑服务会误重启健康的容器。
 
+### 铁律 2 的补集：要给别的设备用的服务，验收必须从对端打
+
+本机 `127.0.0.1` 通 **只证明进程活着，不证明组网能到**。新建的对外服务（relay、web 控制台、APK 下载页）
+必须从**另一台组网节点**反向验证，否则「本机 200」会掩盖「绑错了 `127.0.0.1`」或「组网路由没生效」。
+
+```bash
+ssh <另一节点> 'curl -s -m8 -o /dev/null -w "%{http_code}\n" http://<NAS组网IP>:<端口>/healthz'
+```
+
+- 实测：容器绑 `0.0.0.0` + 宿主端口映射后，**组网无需任何端口白名单**，从 `100.66.1.6` 打 NAS 的新端口直接 200。
+- 先验本机（服务层）→ 再验对端（链路层），两个都绿才算交付；顺序反过来会把「服务没起好」误判成「隧道不通」。
+- 容器重建/换端口后要**重新从对端验一次**，不能沿用上次的结论。
+
 ## 铁律 3：MCP 端点不能用裸 TCP / GET 探测
 
 Streamable-HTTP MCP 端点（`/mcp`）对非法请求**直接关连接**，表现就是「建连即断、零字节」。
@@ -147,6 +176,24 @@ curl -s -m8 -i -X POST http://<IP>:3456/mcp \
 
 成功返回 `HTTP 200` + `event: message` + `data: {"jsonrpc":"2.0","id":1,"result":{...}}`。
 **`Accept` 必须同时含 `application/json` 和 `text/event-stream`**，缺一个会被拒。
+
+## 新节点接入（给 peer 开 SSH 通道）
+
+对端不在组网里时，排障没有意义，先把它接进来。**NAS 侧不需要任何改动**：`owjdxb` 是 `--network host`
++ `/dev/net/tun` + `NET_ADMIN` 的完整节点（不只是 relay），新 peer 一上线就能从 NAS 直接打它的 `100.66.1.x`。
+
+给对端 agent 的接入清单一次给全，别拆成五轮问：
+
+1. 装 NodeBuddy 客户端（`ionewu/nblink`），用**同一个账号**登录，拿到自己的 `100.66.1.x`。
+2. 开 sshd：Linux `systemctl enable --now ssh`；macOS 系统设置 → 通用 → 共享 → 远程登录。
+3. 把本机公钥追加到对端 `~/.ssh/authorized_keys`（600）。公钥用 `ssh-keygen -y -f <私钥>` 现取，
+   别凭记忆粘贴——`known_hosts` 行和公钥长得几乎一样，贴错就是「授权了什么也没授权」。
+4. 让它回四个值：组网 IP、ssh 用户名、端口、它的 A2A 根路径。
+5. 拿到值立刻实测 `ssh -i <key> <user>@<ip> 'hostname; date'`，通了再投凭据、再谈业务。
+
+**判据细节**：TCP 建连成功但 `recv` banner 超时/为空，**不等于 sshd 没开** —— relay 先 accept 再连后端，
+后端慢或没监听都长这样。banner 只用来认机器；「端口通不通、能不能登录」以 `ssh` 自己的三态为准
+（登录成功 / `Permission denied` = 通但没授权 / `Connection timed out` = 真不通）。
 
 ## 诊断流程（按序执行）
 
@@ -196,6 +243,8 @@ curl -s -m8 -i -X POST http://<IP>:3456/mcp \
 
 ## 相关
 
+- 组网 SSH 打不通的专用页（NAS 侧 22 被静默 DROP、nblink 固定拨 `127.0.0.1:22`、`:2200` 反代修法、
+  两个云端节点的归属对照）：`references/ssh-over-mesh-22-blocked.md`
 - mihomo 旁路由/代理/测速：技能 `nas-proxy-sidecar`（同为 `--network host`，但两套东西无关，别混）
 - NAS 容器部署通用坑：技能 `nas-docker-deploy`
 - NAS SSH：`ssh -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2`，`sudo -n` 只免密 `/usr/bin/docker`；容器内**无 `ping`**（`sh: ping: not found`），要测连通性用 `curl -w '%{http_code}/%{size_download}'` 或宿主侧测。

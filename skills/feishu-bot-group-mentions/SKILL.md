@@ -195,6 +195,19 @@ them, print `msg_type` + body, and pull attachments with
 - **Don't hardcode a token or app_secret in a probe script** — probes get archived, synced,
   and shared. Read from the env file, keep the file `chmod 600`, and grep the script for
   `t-`/`ghp_` literals before shipping it anywhere.
+- **`--env-file` is required off the NAS.** The probe defaults to `/opt/data/.env`; a cloud VM
+  keeps its credentials in `~/.hermes/.env` and fails with `env file not found` until you pass
+  `--env-file ~/.hermes/.env`. Install the probe to a durable path (`~/.hermes/scripts/`, 600)
+  when the *other* agent is meant to run it later — `/tmp` will not survive.
+- **Never `grep FEISHU_ <env>` raw while diagnosing.** The app_secret prints in full into the
+  tool output, and tool output is persisted in `state.db` and session archives — a worse
+  exposure than the `600` env file it came from. Mask it: `grep -E "^FEISHU_" <env> | sed "s/=.*/=<set>/"`.
+- **A bot's own claim that it "has no tool to send group messages" / "lacks group-read
+  permission" is not evidence.** It is usually a stale memory entry being recited. Verify with
+  that bot's own credentials (`--chat-info`, then `--send` to its owner) before touching any
+  Feishu console setting: `code:0` + `mention ok` + exit `0` means the capability was always
+  there and the fix belongs in its MEMORY/SOUL, not in permissions. Full procedure: skill
+  `agent-down-doctor`, 第 0.95 层.
 - **Don't open `im:chat:readonly` or `im:message.group_msg` just to diagnose an @ problem.**
   Both are sensitive scopes and neither fixes a mention that didn't parse; the log-prefix
   source covers the id need without a permission change.
@@ -226,6 +239,57 @@ them, print `msg_type` + body, and pull attachments with
   scraping gets you the file *name* and nothing else. When a peer says "the doc is in the group
   files", don't burn the turn on extraction: ask for it as a message that **@-mentions you**
   (then read it back with the section above), or take it from the shared Git hub.
+
+## When the bot refuses: fix the agent, not the app
+
+A bot that argues "我做不到，物理上没有能力" has three separable faults. Fix them in this
+order; only the first is about code.
+
+1. **Capability** — usually fine. Prove it with the bot's own credentials (`--chat-info`,
+   then `--send`) before reading any config.
+2. **Belief** — the stale memory entry. Rewrite it in place (do not append a second, nicer
+   entry: the model reads both and quotes the old one). Then add a short SOUL block naming
+   the forbidden excuses verbatim, e.g. 「我没有发群消息的工具」「Friday bot 是另一个进程」
+   「app 缺读群权限」, plus the one command that works.
+3. **Session history** — the killer, and the one people miss. The refusal itself ("我做不到。
+   不是不想，是物理上没有能力") sits in the live session and gets re-read every turn; a
+   corrected MEMORY/SOUL will still lose to it. End the session so the next inbound starts
+   clean:
+
+   ```sql
+   UPDATE sessions SET ended_at=<now>, end_reason='session_reset'
+    WHERE id='<session_id>' AND ended_at IS NULL;
+   ```
+
+   then restart the gateway. `session_reset` is exactly what the bot's own `/new` writes, so
+   this is the supported path, not a hack. Back up `state.db` first (it is tens of MB).
+
+**Identity split-brain.** The common root cause is the agent believing the group bot is a
+*separate process* from the DM assistant. It is the same gateway: one log shows both
+`Inbound group message` and DM turns. Say this explicitly in SOUL — 「DM 和群都是我这一个
+进程在处理」— otherwise the model reasons its way back to "我没有那个手" no matter what
+MEMORY says.
+
+**Never let the agent read `.env`.** Give it a wrapper (`~/.local/bin/feishu-at`, 700) that
+loads the env file internally and takes only chat_id / open_id / text. Without one, a
+diagnosing agent will `grep FEISHU_APP_SECRET` and paste the secret into a heredoc — the
+command line lands in the session log, which is a worse exposure than the `600` file. If a
+secret has already been echoed into a tool output, report it for rotation; do not re-test it.
+
+**Rotating a leaked app_secret is a console action and it needs BOSS's phone.** With no browser
+session, `https://open.feishu.cn/app` redirects to
+`accounts.feishu.cn/accounts/page/login?app_id=7&redirect_uri=…` and that page is **QR-only**
+(the QR is a `<canvas>`, so clip-screenshot it and send it to BOSS to scan — recipe in
+`cdp-browser-automation`). The console session is unrelated to the app's `tenant_access_token`,
+so no token you already hold gets you in; don't burn turns on cookie injection. Direct app path
+after login: `https://open.feishu.cn/app/<app_id>/baseinfo`. Resetting kills the old secret
+instantly — update the env file and restart the gateway back to back, or the bot sits offline
+in between.
+
+**Audit the "only path" it demands.** A refusing agent often substitutes a credential ask
+("give me NAS SSH and I'll run ./sync.sh") for the thing it was told to do. Check the claim
+before escalating to BOSS: here `cloud → NAS:22` is refused through the relay, so the demand
+was not even actionable — and the @ needed no SSH at all.
 
 ## Honest reporting
 

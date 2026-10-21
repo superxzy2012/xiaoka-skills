@@ -29,6 +29,9 @@ such links; or a task needs durable notes built from video content.
   be fabricated). If transcription fails, write an explicit failure marker, not a plausible body.
 - **Generate the skeleton, then read the transcript yourself and write the key points.** Do not
   have a second model summarize unverified ASR output into the final note without a check.
+  What the ingest script writes is a skeleton — `status: 待核查`, 「待提炼」要点、title 还带着
+  hashtag。交付前**整篇重写**（标题/frontmatter/要点/FACT 表/边界），再用 `push_to_vault` 重推；
+  只补一行要点就交，库里留的就是一条读不下去的半成品。
 - **Write to the shared library's canonical directory for that platform**, with a
   frontmatter block and a link back to the original. Naming and location are what make the
   library navigable later.
@@ -163,7 +166,17 @@ After the normal transcript + frame-OCR pass:
    - Skill `description` must be ≤60 chars or `skill_manage` rejects the create; put
      detail in the body.
    - Then set `status: 已核查` and `github_repo: owner/repo` in the note's frontmatter.
-4. **Only come back to ask** for destructive operations, money, or credentials.
+   - **装法用仓库自带的 installer，别自己搬文件**：`node installer/install.js --only hermes --dry-run`
+     先看落点，再去掉 `--dry-run`。`npx -y github:owner/repo` 会被 npm 的 git 依赖拦截，裸
+     `git clone` 在本机会超时 —— 源码用 `gh api repos/owner/repo/tarball/main` 取。
+     完整命令、节点落点与验证方法见 `find-skills-xiaoka` 的「把第三方技能包装进 Hermes」。
+   - **装完要真跑一次**：普通模式与技能模式同一道题各跑一遍，比字数和事实完整度；
+     `skills_list` 里有条目只证明注册了，不证明它真的改变了输出。
+4. **BOSS 说「推广到蜂群」= 每个节点都装 + 通知，不是本机装上就算完**：共享库
+   `/opt/nas/volume2/2-AI/skills/`、云端 `~/.hermes/skills/`（改完重启 gateway）、NAS 贾维斯容器内
+   `/opt/data/skills/` 各拷一份 —— **技能是实体拷贝不是软链**，共享库改了不会自动到别人家。
+   `find-skills-xiaoka/scripts/distribute_skill.sh <skill...>` 一条命令做完，再在管理群发通知。
+5. **Only come back to ask** for destructive operations, money, or credentials.
 
 Same-org same-language siblings are the strongest decoys: `firecrawl/pdf-inspector` (★19,472,
 Rust, same org) matched on every heuristic but handles PDF only, while the correct answer was
@@ -294,6 +307,21 @@ pitch; a permissive license on the tool does not grant any right to run it again
 else's closed-source product. `✅ 核实通过` on the video's claims and `⚠️ 视频漏说` on the
 maintainer's caveats belong in the same table, so a later reader sees the gap without opening
 the README.
+
+**Never assert a project lacks a capability without grepping its source tree.** A README's
+headline list omits what ships as optional extras, and an "it doesn't do X" line turns a
+comparison into a false one. Ground truth is `pyproject.toml` extras, `docs/`, and
+`tests/test_*` — one grep for the feature's vendor names (`grep -ril "feishu\|lark" .`) before
+the sentence is written, not after the user pushes back. A project pitched as "a personal agent
+app" can still ship Feishu/DingTalk/WeCom/Telegram channels over long connections, MCP, and
+skills — i.e. it overlaps the local stack far more than the pitch suggests.
+
+**When comparing a video's project against the local stack, assume the capability lists overlap
+and put the difference in topology and maturity.** The honest axes are: single-device app vs
+server-resident runtime; one agent vs a multi-agent bus; what the "hands" can reach (screen
+control of phone/desktop apps is a genuinely different power than shell + browser); and age
+(weeks-old repo, open-issue count, beta-only platforms). "It's a different species" and "it's a
+replacement" are both wrong framings for a project that shares most of the checklist.
 
 ## Archiving
 

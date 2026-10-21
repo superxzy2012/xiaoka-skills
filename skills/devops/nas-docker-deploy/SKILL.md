@@ -115,6 +115,13 @@ curl -s http://192.168.199.2:<hostport>/ | head -c 200                       # �
 
 判据（至少命中一个才算部署成功）：响应正文里的 `<title>`、产品名、或 `/api/health` 的 JSON 字段。
 
+### 🔴 对话/agent 类应用：验收必须真发一轮对话，HTTP 200 不算
+
+这类产品（自托管 AI 助理、IM bot、控制台）**聊天通常只走 WebSocket，REST 里根本没有 chat 路由**。
+`/openapi.json`、`/api/openapi.json`、`/docs` 全 404 也不代表接口坏了 —— 很多产品压根不暴露 OpenAPI。
+做法：`docker exec <c> grep -rn "APIRouter\|websocket" /app/src/**/routers/` 从源码拿真实路由与消息体格式，
+再用 `websocket-client` 真发一句、收到非空正文才算通。别拿「页面能打开」当验收。
+
 ### 🔴 读真实端口绑定用 docker inspect，不要读 docker ps 的 Ports 列
 
 `{{.Ports}}` 会把镜像 `EXPOSE` 的端口和实际绑定**并排**打印，例如：
@@ -216,7 +223,45 @@ with open_cli_services(None) as svc:
 ⚠️ `/api/usage/history` 的 `byModel` **不能**用来验证单次调用（聚合滞后，实测 ping 后计数不动）—— 要验证就直连模型工厂看返回文本。
 
 - 实测结果：`assistant` / `free-pool` 两个 combo 都返回 `PONG`；`octop models active` = `omniroute / assistant`。
-- 完成向导前 8088 无鉴权开放（`setup_required=true`），账号由 BOSS 自己在页面建。
+- 完成向导前 8088 无鉴权开放（`setup_required=true`），账号可由 BOSS 自己在页面建；也可以脚本一次性建完，见 5.1.1。
+
+### 5.1.1 用 setup 向导 API 一次性初始化（SQLite + 管理员 + provider）
+
+BOSS 说「帮我配置好，下次开箱即用」时，**不要手点向导页面** —— 向导本身就是一组 HTTP 接口，脚本跑完即交付。
+
+**先读源码拿契约**（向导态下没有 OpenAPI）：
+
+```bash
+sudo -n docker exec octop ls /app/src/octop/api/routers/
+sudo -n docker exec octop grep -n "@router\|class .*Request" /app/src/octop/api/routers/setup.py
+sudo -n docker exec octop sed -n '1,120p' /app/src/octop/api/routers/setup.py
+```
+
+顺序固定：`GET /api/setup/status` → `POST /api/setup/begin`（取 setup token，后续每步都要带）
+→ `POST /api/setup/database`（选 sqlite）→ `POST /api/setup/initial-admin`（username/email/password）
+→ `POST /api/setup/test-provider` → `POST /api/setup/finish`。
+
+🔴 **数据库只能绑一次。** 已绑定的实例再调 `/api/setup/database` 会把连接池关掉，
+之后所有碰 DB 的请求报 `Cannot operate on a closed database`（这一步本身还返回成功，最容易误判）。
+处置：`sudo -n docker restart <c>` 即恢复，数据不丢。**所以初始化脚本第一件事必须是读 `status.setup_required`，
+false 就跳过数据库那一步** —— 重跑脚本不能靠「接口大概幂等」这种假设。
+
+- 选 **SQLite**（单文件 `octop.db`，随数据目录持久化）；页面上的 PostgreSQL 是内测选项，别选。
+- provider 的 key 从 `/opt/data/.env` 读（如 `CUSTOM:192-168-199-2-20128_API_KEY`），脚本里不出现明文；
+  生成的 admin 密码写 `/opt/data/secrets/<app>_admin.txt`（600，目录 700），不打印。
+- 验收四件套：`/api/health` 返回 `db:true` + `agents_running:1`；登录拿 `access_token`；
+  `GET /api/providers/active-model` 指向你配的那条；**WebSocket 真发一轮对话**：
+  ```
+  ws://<host>:<port>/api/agents/<agent_id>/chat/ws?token=<JWT>
+  → {"type":"user_turn","text":"现在几点"}  # 收流式，要看到中文正文
+  ```
+- 🔴 **必须复验「重启后还能用」**：`docker restart` 后容器有几十秒不可用期，立刻请求会被误判成坏了 ——
+  轮询 `/api/setup/status` 到 200（约 12×8s）再重跑 e2e。顺带核 `docker inspect --format '{{.HostConfig.RestartPolicy.Name}}'`
+  与 `GET /api/settings/timezone`（多用户产品自带 cron，时区错会导致定时任务按 UTC 跑）。
+- 交付话术：地址 / 账号 / 密码 / 已选 SQLite / 接了哪个模型 / 实测证据（一句真回复）/ 自启策略，
+  外加一句「密码文件在哪、建议自己改」。
+- 配好之后 BOSS 必然追问「这到底是干嘛的、在蜂群里能做什么」—— 走 `self-hosted-platform-onboarding`
+  （四层取证 + 落位判断 + 表格化交付），不要凭 README 现编。
 
 ### 5.2 另一例：cli2api（管理员 key 从启动日志取）
 
@@ -352,6 +397,20 @@ $SSH 'curl -s http://127.0.0.1:3003/api/auth/status'   # 期望 {"needsSetup":fa
   clod(4) · bazaarlink(3) · llm7(3) · routeway(3) · zhipu(3) · nara(2) · radeon(2) · unorouter(2) · logfare(2)。
   交付时必须明说这一步，否则 BOSS 会以为装坏了。
 
+**5.5.2 忘了密码 / BOSS 要账号密码（已实操）**
+
+`users.password_hash` 是 **scrypt 单向哈希**（`scrypt$<salt>$<hash>`），**没有反解路径**。不要停在「读不出来」这句上，也别改哈希或自造密码 —— 走应用自带的重置流程，让 BOSS 自己设：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://192.168.199.2:3003/api/auth/forgot-password \
+  -H 'Content-Type: application/json' -d '{"email":"<账号邮箱>"}'
+$SSH 'sudo -n docker logs --tail 25 freellmapi 2>&1 | grep -A3 -i "reset code"'
+```
+
+- 码打在容器日志里，**TTL 15 分钟**；过期就再触发一次（幂等，可反复生成）。
+- 交付格式：账号 + 重置码 + 有效期 + 登录地址 + 三步操作；并明说「哈希读不出是设计如此，不是我扣着不给」。
+- 账号若也不确定：`select email from users` 从 DB 副本读（**副本用完删**）。
+
 ### 5.6 又一例：cdp-chrome（2026-10-16 部署，T-012）
 
 NAS 容器内自建 headless Chromium，给抖音/B站解析提供 CDP，**摆脱对局域网电脑的依赖**。
@@ -429,6 +488,41 @@ python nas_cdp.py bilibili <url>
   ```
   改完重启 Hermes；工具注册名 `mcp_obsidian_hive_obsidian` 等。验证 MCP 用原生 `initialize`→`notifications/initialized`→`tools/list` 三步握手（Accept 要带 `text/event-stream`，session 走响应头 `Mcp-Session-Id`，SSE 体取 `data:` 行）。
 
+### 5.8 又一例：nanoMuse（源码自建镜像 + 配置文件挂载 + OmniRoute）
+
+上游 `nano-muse/nanoMuse`（GPL-3.0-or-later，Python 内核 + Swift App），**没有官方镜像** → 源码构建。
+
+- 取源码用 codeload tarball（`git clone` 写 NAS 磁盘极慢）：
+  `curl -sSL https://codeload.github.com/<owner>/<repo>/tar.gz/refs/heads/main | tar xz --strip-components=1`。
+- 构建：`sudo -n docker build --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple -t <app>:latest .`，
+  实测 88s / 391MB。**必须后台跑**（`background=True`），前台会撞工具超时。
+- 目录 `/volume2/2-AI/<app>`：`config/config.toml`（**单独 ro 挂载进容器**）、`.env`（600）、`workspace/`、具名卷 `<app>-data`。
+- 🔴 **改配置走「挂载 + restart」，不要重建镜像**：`-v .../config/config.toml:/app/config/config.toml:ro`
+  → 改完 `docker restart` 即生效。重建一次 90s，改配置 3s。
+- 🔴 **OmniRoute 的模型 id 必须带 provider 前缀。** 写 `model = "deepseek-v4.1-flash"` 直连 20128 返回
+  **404 model not found**；带前缀的 `a2a/deepseek-v4.1-flash` 才通。查真实 id：`GET /v1/models` 后按关键词 grep，
+  取**带 `/`** 的那条 —— 不带前缀的裸名看起来最自然，恰恰是不存在的那条。
+- `docker run` 当初没写 `--restart` 时补：`sudo -n docker update --restart unless-stopped <c>`（不必重建容器）。
+- **验收要真跑一次模型**，不是只看 HTTP 200：`sudo -n docker exec <c> <cli> run "用一句话说明你是谁"`，
+  看到中文正文才算通；Web 控制台另测 `curl -w "%{http_code}"`。
+
+### 5.9 自建 relay（hub）+ 多设备接线（nanoMuse `cloud/`）
+
+- **三个角色别混**：runtime = 某台机器上的手（shell/浏览器）；relay = 总机（账号/路由/模型代理，不碰屏幕）；
+  手机 App = 唯一能碰手机屏幕的手。**部署前先问「BOSS 要它碰什么」** —— 要碰手机就必须装 App，只装 runtime 没用。
+- 上游自带 `docker-compose.local.yml`（无 TLS/局域网模式），直接 override，别自己写：
+  `RELAY_BIND=0.0.0.0` + `RELAY_PORT`（本 NAS 用 8795，8787/8788/8790/8791 都被占）+ `PUBLIC_BASE` + `CODE_SENDER=log`。
+  `cloud/data` 属主要 `chown 10001:10001`（借 `docker run --rm -v ...:/d alpine chown`）。
+- 🔴 **relay 内置模型菜单是厂商裸名，OmniRoute 只认带前缀 id** → 必须用 `CLOUD_MODELS` 把 `id`（App 请求的）
+  与 `upstream`（真实上游 id）分开映射，否则客户端一发就 502 `upstream_model`。每个 lane（chat/gui）恰好一个 `recommended_for`。
+- 🔴 `/v1/auth/code` 返回 **204 无 body**（`json.loads` 会炸）；验证码打在容器日志里且 **TTL 很短**，取码与 verify 要连着做；
+  verify 返回的 token 字段名是 **`api_key`**。
+- 🔴 **跨网可达性必须从另一台组网节点验**：本机 `127.0.0.1` 通只证明进程活着，不证明组网能到；relay 重建后要再验一次。
+- 🔴 **部署前先写清用途（谁用、碰什么、BOSS 怎么触发）**，写不出就先问。反例：装了 runtime 判「无增量」删掉，
+  后来才发现它是「飞书 → 手机」链路的必需中间层，得重装。
+
+完整配方（env 清单、CLOUD_MODELS 示例、e2e 五步、能力边界表）见 `references/self-hosted-relay-hub.md`。
+
 ## 六、汇报给 BOSS 时
 
 结论先行 + 表格：URL / 端口 / 数据目录 / 镜像 tag / 状态。
@@ -438,6 +532,11 @@ python nas_cdp.py bilibili <url>
 端一句「请自己去读文件」只会让他多跑一趟。给的时候附上三件事：① 它的权限范围（控制台全权 / 仅 API）；
 ② 它现在还暴露在哪些地方（明文文件、容器日志）；③ **建议轮换**。
 自己为了排查而复制出来的含密文件（DB 副本、导出文件），**用完立刻删**，不留明文残留。
+
+🔴 **密码存的是单向哈希时（scrypt/bcrypt），不存在「读出来」这条路**：别改哈希、别自造一个密码塞进 DB，
+走应用自己的重置流程（FreeLLMAPI：`POST /api/auth/forgot-password` → `docker logs | grep -i "reset code"`
+取 15 分钟码），把码交给 BOSS 让他自己设新密码 —— 这样谁都不用知道他的密码。
+交付时把「读不出是设计如此」讲在前面，并给出码的有效期。
 
 ## 七、NAS 上「这个端口是什么服务」的取证
 

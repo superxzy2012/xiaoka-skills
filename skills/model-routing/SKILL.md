@@ -159,6 +159,176 @@ fallback_providers:
 - `hermes config set` 写 JSON 列表/嵌套结构会把文件改坏（丢注释、缩进错乱），事后要靠 `hermes config check` 才看得出。
 - 走 python 文本替换：读全文 → `assert s.count(old)==1` → 写回；改前备份，已知良好版本在 `/opt/data/backups/config/config.yaml.good.*`。改完跑 `hermes config check`（无 error/invalid 才算过）。
 
+## 八、按任务选免费模型（2026-10-20 全量实测）
+
+**先记住四个硬事实：**
+
+1. `/v1/models` 里 58 个「免费」模型，**实测只有 22 个真能打通**。23 个 404（列表脏数据/上游已下架）、5 个 429、4 个 401、3 个 400。**列表 ≠ 可用**，选型前必须探活。
+2. **`auto/*` 别名全部不可信**。实测：`auto/best-reasoning` 落 `deepseek-v4.1-flash`、`auto/best-coding` 同样落 flash、`auto/cheap`/`auto/thrifty` 也是 flash。名字里的 best/pro 不代表真上大杯。**要固定取向只能用显式 model id。**
+3. 同一个模型在不同 provider 前缀下可用性不同：`openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` 通，`wbfree/...`、`oc/...` 同名的全 404/403。
+4. **`nemotron-3-ultra-550b-a55b:free` 是 BOSS 指定给 Claude Code / ACP 的专属后端**，不进任何日常路由。`pick_model.py` 的 `TIERS` 里不得出现它（reasoning / coding / longctx 三档都算）；日常任务一律 lightning → minimax → dots/super-vl。改完 TIERS 必须 `smart --dry` 跑四个典型任务（写脚本 / 排查故障 / 看图 / 总结），确认没有一条再指向 550B。
+
+### 8.1 选型工具（唯一入口）
+
+```bash
+python3 /opt/data/memories/pick_model.py reasoning   # 打印该用的 model id
+python3 /opt/data/memories/pick_model.py fast --json
+python3 /opt/data/memories/pick_model.py --list      # 全部档位
+```
+
+- 每档是**有序候选表**，真打一发 1-token 探活，取第一个通过的；结果缓存 120s。
+- 全挂时退出码 1，调用方降级到 `free-pool`。
+- 云端星期五：`~/.hermes/memories/pick_model.py`，地址用环境变量 `OMNIROUTE_BASE=http://100.66.1.7:20128/v1`（脚本读 `~/.hermes/.env`）。
+
+### 8.2 实测能力表（逻辑题 / 3^100 mod 7 / tool_calls）
+
+| 模型 | 逻辑 | 数学 | 工具 | 延迟 | 上下文 | 结论 |
+|---|---|---|---|---|---|---|
+| `openrouter/nvidia/nemotron-3-ultra-550b-a55b:free` | ✓ | ✓ | ✓ | 10.7s | 1M | ⛔ **只归 Claude Code/ACP**，见 §8 硬事实 4 |
+| `openrouter/nvidia/nemotron-3.5-lightning:free` | ✓ | ✓ | ✓ | 8.6s | 1M | 次选，更快 |
+| `openrouter/minimax/minimax-m3.1-flash:free` | ✓ | ✓ | ✓ | **4.3s** | 1M | **快档首选** |
+| `openrouter/dots-studio/dots-3-note-preview:free` | ✓ | ✓ | ✓ | 11.7s | 512K | 长文档备选 |
+| `openrouter/nvidia/nemotron-3.5-super-vl:free` | 空 | ✓ | ✓ | 24s | 1M | **视觉专用**，纯文本任务别用 |
+| `openrouter/cohere/north-mini-code:free` | ✗ | ✓ | ✓ | 8.1s | 256K | 只适合写代码 |
+| `openrouter/poolside/laguna-xs-2.1:free` | ✓ | ✓ | ✓ | 21s | 262K | 慢，兜底 |
+| `openrouter/xingchen-agi/xing4.0-29b-a4b:free` | ✗ | ✗ | ✓ | 25s | 262K | 不推荐 |
+| `owbwin/OC · Nemotron 3 Ultra Free` | — | — | — | 21.9s | 128K | 慢一个数量级，仅备源 |
+| `wbfree/global:hy3`、`wbfree/OC · Big Pickle`、`oc/nemotron-3-ultra-free` | 404/403 | | | | | **列表里有，实际打不通** |
+
+### 8.3 三种接法（按需要选）
+
+| 场景 | 做法 | 生效范围 |
+|---|---|---|
+| 单次任务换脑 | `hermes chat --provider custom:192-168-199-2-20128 -m "$(python3 memories/pick_model.py coding)" -q "..."` | 本次调用 |
+| 全局默认 | 改 `model.provider` + `model.default` + `base_url` 三件套 | 所有会话 |
+| 子代理 | `delegation.provider` / `delegation.model`（**全局，不能 per-child**） | 所有子代理 |
+| 子代理要各用各的 | 别用 `delegate_task`，改用 `terminal(background=True)` 跑 `hermes chat -m <model> -q ...` 当「模型钉死的 worker」 | 每个 worker 独立 |
+
+### 8.4 坑
+
+- **`-m` 必须配 `--provider`**。只给 `-m openrouter/...` 会打到当前 provider（`nas-8788`）报模型不存在。
+- `hermes chat -m` 在带 tools 的任务上会先跑一轮 terminal 探测，日志里刷 `preparing terminal…` 属正常，别当故障。
+- `delegation.model` 填错会让**所有**子任务同样失败，且有专门的通知逻辑（`_delegation_model_not_found`）——改完先跑一个最小子任务验证。
+
+## 九、JEV 决策模型：只当分类器，不当模型（2026-10-20 实测）
+
+BOSS 有 JEV 的 API key，接入点在 OmniRoute 里已存在两条：
+
+| 连接 | 前缀 | base | 实际能力 |
+|---|---|---|---|
+| `jev-router` | `jev` | `192.168.199.184:41986` | 普通 chat 模型（`jev/free` `jev/coding` `jev/smart` `jev/vision`），能答题、能 tool_calls |
+| `JEV-Decision` | `jevd` | `192.168.199.2:8082` | **不是 chat 模型**，是决策打分器 |
+
+### 9.1 jevd 的真实协议（踩坑重点）
+
+- 普通 `messages` 请求 → `HTTP 400 missing_questions`。
+- **正确形状是 `state` + `questions`（不用 `messages`），且 `questions` 必须是 dict 不是 list**：
+  ```json
+  {"model":"jev-latest",
+   "state":"<待判任务，一段自然语言>",
+   "questions":{"owner":{"type":"choice","instructions":"Which expert?",
+     "criteria":{"小安":"合规认证","老钱":"财务测算","小维":"技术运维"}}}}
+  ```
+- **`criteria` 必须放在 question 对象的顶层**。嵌进 `choice`/`score` 内部 → 服务端报 `missing`、`jev_answers` 空，表面看像「模型没反应」。两轮探测脚本全白跑就是它；改对后一次 12/12。
+- 三种 `type` 的返回位置：`choice` → `jev_answers.<k>.choice`（键名就是 criteria 的键）；`score` → `.score` 是 **0-based 下标**（criteria 用有序列表）；`noul` → `.noul` 是 0~1 概率，不需要 criteria。
+- `questions` 传 list → `HTTP 502 / upstream 422 Input should be a valid dictionary`。
+- 响应里 `message.jev_answers` 给每个问题一个 `noul` 分数（0~1），同时 `content` 是一份同样的 JSON 文本。
+- **顶层 `questions` 能过 8082 直连，但过不了 OmniRoute**（网关不转发非标准字段，照样报 missing_questions）。所以路由时**先试直连 8082**，OmniRoute 只能走 system message 塞 `{"questions":{...}}` 那条路（实测能过，但偶发不稳）。
+- 两个模型名都指向同一后端：`jev-latest` = `jev-1.13.0`（响应体 `model` 字段回 `jev-1.13.0`）。
+
+### 9.2 实测结论：值不值得用
+
+**值得，但只能当分类器，不能当生成模型。**
+
+| 用途 | 结论 | 依据 |
+|---|---|---|
+| 当聊天/推理模型 | **不行** | `jevd/*` 一律 400；`jev/*` 能答但逻辑题错（`jev/free` 逻辑✗）、延迟 6–26s，`jev/smart` 直接 120s 超时 |
+| 当任务分类器（选档） | **很好用** | 12 条真实任务分档 **11–12/12 命中**，延迟 0.4–3.5s，比关键词规则（8/12 = 67%）强 |
+| 当模型选择器（直接吐 model id） | **不要** | 会编造模型名；正确做法是它只回答 5 个二分类，档位→模型由 `pick_model.py` 查表 |
+
+### 9.3 已落地：两级路由
+
+```bash
+python3 /opt/data/memories/route_task.py "读一张发票截图，提取金额"
+# 档位: vision  (判定来源: direct)
+# 模型: openrouter/nvidia/nemotron-3.5-super-vl:free
+```
+
+链路：**JEV 打 5 个二分类（vision / longctx / coding / reasoning / trivial）→ 分数≥0.5 定档 → `pick_model.py` 查表 + 探活 → model id**。
+
+5 个问题（固定，别改措辞，改了准确率掉）：
+
+| 键 | 问什么 |
+|---|---|
+| `needs_vision` | 是否需要看图片/截图/扫描件/视频画面 |
+| `needs_long_context` | 是否涉及十万字以上文本/整个代码库/大量日志 |
+| `is_code_task` | 核心产出是否是代码 |
+| `is_trivial` | 是否一句话就能答完 |
+| `needs_hard_reasoning` | 是否需要多步推理/权衡方案/复杂诊断 |
+
+失败链：`直连 8082` → `OmniRoute system message` → `关键词规则兜底`。任一环挂都不阻塞，`via` 字段会告诉你走了哪条。
+
+### 9.4 什么时候别用 JEV
+
+- **延迟敏感**：每次多 0.4–3.5s。群聊短答、cron 高频任务直接走关键词或固定档。
+- **已有明确任务类型的固定任务**：早盘播报、周复盘这类天天一样的，直接写死档位，不用每次问 JEV。
+- **要它输出结构化长文本**：它不是生成模型，别拿它写报告。
+
+### 9.5 怎么用（已装好的三处）
+
+一条命令完成「JEV 分档 → 探活选模型 → 真执行」：
+
+```bash
+smart "读这张截图里的金额"          # 全自动
+smart --dry "排查容器反复重启"      # 只看选什么，不执行
+smart --tier coding "写个归档脚本"   # 跳过 JEV 强制档位（固定任务用这个）
+smart --model openrouter/nvidia/nemotron-3.5-super-vl:free "看图"   # 完全手动
+```
+
+部署位置：
+
+| 位置 | 路径 | provider 自动识别 |
+|---|---|---|
+| 小卡本机 | `/opt/data/bin/smart`（已在 PATH） | `custom:192-168-199-2-20128` |
+| 云端星期五 | `~/.local/bin/smart` | `omniroute` |
+| 共享库（任何 agent） | `/opt/nas/volume2/2-AI/skills/agent-model-routing-setup/scripts/smart` | 按 config 判断 |
+
+云端跑需要带环境变量（NAS 走虚拟网 IP）：
+```bash
+OMNIROUTE_BASE=http://100.66.1.7:20128/v1 JEV_BASE=http://100.66.1.7:8082/v1 smart "..."
+```
+
+### 9.6 接入建议（按性价比排）
+
+| 场景 | 做法 | 为什么 |
+|---|---|---|
+| 一次性难任务、跑完就走 | `smart "..."` | 自动按档位选（reasoning 首选 lightning，**不再拿 550B**） |
+| 天天一样的 cron（播报/周报/巡检） | `smart --tier fast/--tier reasoning` | 固定任务不需要每次花 0.5–3s 问 JEV |
+| 子代理各用各的模型 | `terminal(background=True)` 跑 `smart` 当 worker | `delegate_task` 不能 per-child 钉模型 |
+| 主会话默认脑 | 改 `model.provider/default/base_url` | 全局生效，慎改 |
+
+**别做**：不要用 `delegate_task` 的 `delegation.model` 去追任务差异——它是全局的，一个值管所有子任务，改错会全线挂。
+
+### 9.7 四种判断类型 + `jev_ops` 库（现成实现，别再手写）
+
+决策层能干的活就是四类，全部封装在 `/opt/data/bin/jev_ops.py`（失败一律降级，绝不抛异常打断主流程）：
+
+| 函数 | 判断 | type | 降级值 | 实测 |
+|---|---|---|---|---|
+| `pick_expert(text)` | 该派哪个 agent | `choice` | 小通 | 6/6，`conf<0.5` 自动回总协调 |
+| `priority(text)` / `priority_rank()` | 0–3 紧急度 | `score` | 本周内(1) | 乱序投递 → 正确重排 |
+| `pick_model(text)` | vision / deepseek / flash / none | `choice` | deepseek | 图片翻译→vision、改名→none |
+| `accept(deliverable, requirement)` | 交付是否合格 | `noul` | 放行 | 空话 FAIL、有数据 PASS |
+| `needs_human(text)` | 要不要人工确认 | `noul` | 不拦 | 删 50 SKU 0.98🔴 / 写 5 条标题 0.04🟢 |
+
+CLI：`jev expert|model|prio|human|accept|all|batch`。
+
+两条纪律：
+- **`accept` 先卡长度闸再语义判**（<30 字符直接 FAIL），否则「好的我马上做」这类空话会拿到中等分蒙混过关。
+- **低置信度是特性不是 bug**：`conf<0.5` 时不要硬取 top-1。任务本身模糊（「20 个 SKU 价格异常，涉及财务和后台操作」→ 老钱 0.27 / 小维 0.33 / 小通 0.31）就该回落到协调者或反问 BOSS。
+
+成本：单次 0.4–1.4s / 300–600 tokens，比 LLM 分类（2–5s / 2–5k）便宜一个数量级；但**延迟敏感场景仍别用**（见 9.4）。
+
 ## 七、自我进化
 
 每季度回顾一次，找到『model-routing』技能里依然在写的旧规则 / 多余段落，合并或删除；写批量`git commit -am "clean"` + `git pull --rebase` + `git push`
@@ -189,3 +359,5 @@ python3 /opt/nas/volume2/2-AI/skills/agent-model-routing-setup/scripts/probe_mod
 - **是否要重启 gateway 取决于该项在哪读**：`model.*` 与 `display.*` 每轮现读（`_load_gateway_config()` 无缓存），改完即生效；但 `streaming.enabled` 由 `runner.config.streaming` 在**网关启动时快照**，改完必须重启网关。判据是 grep 读点，不是猜——见技能 `hermes-latency-tuning`。
 - 禁 reboot：跑在 NAS 上，重启 = 自杀。
 - 改完**顺手检查注释与声明是否跟得上**：config 里 `model.default`、注释、`providers.*.model` 三处说法不一致时**不会报错**，只会让 `context_length` 等按错的模型算。发现不一致就报给 BOSS 并给出统一选项，别只改一半。
+- **云端 gateway（`systemd --user hermes-gateway`）切模型要改四处**：`model.default`、`model_display_name`、provider 块里的 `name`（面板和日志显示用）、restart。改前先 `cp config.yaml config.yaml.bak.<用途>`，回滚靠它。
+- **验证生效别指望 journalctl**：它通常不会打出 `active model` 这种明确行。可靠做法是比对 **OmniRoute 的 `call_logs/<日期>/*.json`** 里的 `"model"` 值与 gateway 重启时刻——重启后的第一条就是新选的模型，才算真生效。容器内没 `python3` 时用 `grep -o '"model":"[^"]*"'` 纯 shell 解析。
