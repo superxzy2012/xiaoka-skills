@@ -1,6 +1,6 @@
 ---
 name: nodebabylink-mesh-troubleshoot
-description: Use when 节点小宝/绿联组网不通。先用 RouteAdd 权威表定位对端 IP，再用 16880 探针判定数据面。
+description: Use when 节点小宝/绿联组网不通。先用 RouteAdd 权威表定位对端 IP，再用 16880 探针判定数据面；单节点掉线用三角定位判定，再用跳板隧道绕过。
 ---
 
 # 节点小宝（绿联远程组网）排障
@@ -32,6 +32,33 @@ sudo -n docker exec owjdxb sh -c "ps aux | grep -o 'peerid [A-Z0-9]*' | head -1"
 旧 IP 与旧路径一并作废。判定某台机器上跑的是谁，读它自己的 `~/.hermes/.env` 的 `FEISHU_APP_ID` 和
 `~/.hermes/profiles/` 列表，不要按主机名或「云端 Hermes」这种描述去猜。一台机器上只起了一个网关实例时，
 直接排除「另一个 agent 也在这台」的假设 —— 在那台上翻 profile 找别人的目录是白花时间。
+
+### 自报 peerid 必须回本机核对：字母 `O` 与数字 `0` 是最常见的抄错位
+
+peerid 固定 18 位、以 `OW` 结尾（`O` 是字母）。对端截图或口头报过来的值**不能直接拿去绑定** ——
+先在那台机器上读权威位置：
+
+| 位置 | 内容 |
+|---|---|
+| Windows `C:\Program Files (x86)\nblink\NodeBabyLinkClient.ini` | 完整 peerid（`[A-Z0-9]{18}`，结尾 `OW`） |
+| Windows `C:\ProgramData\NodeBabyLinkService\nblink.dat` | **只有短 pid**（12 位，如 `pid = 9595DAD2AA42`），当完整值绑必失败 |
+| NAS `http://<NAS>:9118/` 跳转 URL 的 `pid=` 参数 | 该机 peerid，无需账号即可取 |
+
+日志里 `InvalidClientPeerId []` 的方括号**本来就是空的**，不是「读到了空值」，别据此判断客户端没拿到 peerid。
+
+### Windows 客户端 `InitNBLink` 报错 = 服务端不认这个 peerid
+
+```
+ERROR glservice/nblink.go:84 InitNBLink          （错误消息为空）
+ERROR datachannel/client.go:91 ConnectAndServe ctx.Done: EOF
+```
+
+伴生现象：信令通（`GLCS_CONNECTED <云端IP>:443`）、`16880` 在听、`100.66.*` 一个都没有。
+这不是网络故障，是账号未登录 / peerid 未绑定。绑完仍不通，就清 `NodeBabyLinkClient.ini` + 状态文件
+重启重生成 —— **peerid 会变，要再绑一次**，提前把代价说清楚，别让对方以为一次就能好。
+
+**别把「等组网」当成阻塞**：对端有公网 IP 时先上反向隧道（见「组网不是唯一解」一节），
+组网只是第二条更省事的路径，不是前置条件。
 
 ## 铁律 1：宿主网络只能借 `--net=host` 容器看，`sudo -n ip` 的输出是假的
 
@@ -81,6 +108,9 @@ done; rm -f /tmp/b
 | `16880 → 404` 但业务端口 `000` | 打错机器（那台上没这个服务），不是链路问题 |
 
 配合铁律 0 的权威表一起看：`100.66.1.5:16880` 有应答 = 那台是 Windows super，不是 NAS。
+
+**但它只证明「网关发起」的连接能双向传数据**，不等于两个方向都自由：客户端主动发起连网关仍可能被团队白名单拦
+（`[team] OnDeviceWhitelist: 0 entries`），见下面「只测网关→客户端方向」一节。
 
 ### 服务端日志 `mapping succ` 后 `sent 0 recv 0 err timeout` = 对端会话死，不是本机服务坏
 
@@ -177,6 +207,72 @@ curl -s -m8 -i -X POST http://<IP>:3456/mcp \
 成功返回 `HTTP 200` + `event: message` + `data: {"jsonrpc":"2.0","id":1,"result":{...}}`。
 **`Accept` 必须同时含 `application/json` 和 `text/event-stream`**，缺一个会被拒。
 
+## 判定「组网是否成功」：只测网关→客户端方向
+
+`100.66.x` **不会出现在设备网卡上**（`Get-NetIPAddress -like '100.66*'` 为空是正常的），IP 由路由器层映射。
+
+正确验收：从**网关（NAS）**发起 TCP 探测，拿到 SSH banner 才算通。
+
+```python
+socket.create_connection(("100.66.1.9", 22), 5).recv(64)
+# b'SSH-2.0-OpenSSH_for_Windows_9.5\r\n'  => 通
+```
+
+**方向是单向的**：网关 → 客户端通；客户端 → 网关（`100.66.1.7:22/3000`）通常不通，日志 `[team] OnDeviceWhitelist: 0 entries, 0 pids`。所以需要客户端主动连网关的场景（git push、拉任务）仍要 SSH 反向隧道，别指望组网。
+
+## 组网不是全连通：一个节点掉线时，别把结论推广到全网
+
+「Windows → `.6:22` 通」只证明 **Windows 和 .6 之间**通，不代表 `.6 → .7` 通。
+每台客户端各自向服务端注册自己的隧道，**某台掉注册 = 只有跟它有关的那几对不通**，其他节点互访照旧。
+所以排障第一步是**三角定位**，而不是问一句「组网通不通」：
+
+| 同一时刻的探测 | 结论 |
+|---|---|
+| A→B 失败，C→B 成功 | 故障在 **A 的出向 / A 的注册**；B 无辜 |
+| A→B 与 C→B 同时失败，而 B 本机 `127.0.0.1` 200 | **B 掉出了组网**（进程活着 ≠ 注册在） |
+| 所有对都失败 | 才轮到服务端 / 账号级故障 |
+
+**`Empty reply from server`（curl exit 52）= relay 接了、对端没回**，判「对端客户端会话死」，不是发起方网络坏。
+与 `000` 严格区分：`000` 是路断了，`52` 是路通但对面没人接 —— 汇报时不能都写成「不通」。
+
+**掉线节点常常当场修不了**：`owjdxb` / `nas_agent_service` 进程活着但注册丢，重启要管理员权限
+（`sudo -n` 只免密 `/usr/bin/docker`）。别卡在「等权限」，直接**跳板绕过**：找一台同时能到 A 和 B 的节点，
+在 A 侧起本地转发，把应用配置里的组网 IP 换成 `127.0.0.1`。
+
+```bash
+# 在 A（应用所在机器）上，B 用物理 IP 而不是组网 IP
+ssh -i ~/.ssh/<key> -o StrictHostKeyChecking=no -o BatchMode=yes \
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes \
+  -N -L 127.0.0.1:<本地端口>:<B物理IP>:<端口> <跳板用户>@<跳板组网IP>
+```
+
+固化成 `systemctl --user` unit（`Restart=always`、`RestartSec=10`、`ExitOnForwardFailure=yes`），
+并 `loginctl enable-linger <user>` —— 否则最后一条 SSH 会话结束时 unit 被回收，隔天又「自己坏了」。
+验收：`systemctl --user is-active` + `show -p Linger` + 一次真实业务请求（不是 `-T` 小包）。
+
+**隧道建在 Linux 侧、穿 Windows 出去，不要让 Windows 托管长连接 `ssh -N`**：非交互会话里
+`Start-Process ssh -N -R ...` 既没有监听也没有报错，纯白花一轮。Windows 只当跳板（它的 22 口往外连是可靠的）。
+
+**跳板需要私钥时给专用 key，别搬管理员私钥**：在跳板机上 `ssh-keygen` 一对新的、只授权到该跳板，
+`chmod 600`。实在要搬，用完即删；Windows 侧删除常被 ACL 挡住（只给了 `(R)`），先
+`icacls <file> /inheritance:r /grant:r "$($env:USERNAME):(F)"` 再 `Remove-Item`。
+
+**绕行不是修复**：跳板一关机就又断，根因（掉线节点重新入网）没解决前必须如实分开说，
+别让用户以为已经收尾。
+
+## Windows Server 无头跑 4.5.2 桌面版（可行，别放弃）
+
+GUI 主程序是 `desktop\NodeBabyLinkDesk.exe`（Flutter，session 0 起不来，20 秒内退出）——**但它不是必需**：
+
+- 服务 `NodeBabyLinkService.exe` 单独跑即可完成绑定 + 组网注册。
+- 验收标志：`http://127.0.0.1:16880/glp/sipstate` 返回 `"msg":"GLCS_CONNECTED","state":1`。
+- 日志里 `ProcFind recv &{Name:[NodeBabyLinkDesk.exe]}` 每 2 秒刷一次是**正常噪音**，不代表故障。
+- `gateway/switch: pid=` 为空也常见，SIP 连上后路由会自己下发（`addRoute 100.66.66.66/32 succ`）。
+
+## 升级后必须重新扫码绑定
+
+4.3.5 → 4.5.2 peerid 会变（`...26377OW` → `...2636BOW`），改 ini 或还原 `nblink.dat` **都无效**，服务端报 `rtn=10208 设备未绑定`。唯一解法：设备页 `jdxb_server_pc_v3/?client=windows&hostname=<h>&pid=<新peerid>` 重新扫码，绑定后服务端会**分配新 IP**（旧 100.66.1.8 → 新 100.66.1.9）。
+
 ## 新节点接入（给 peer 开 SSH 通道）
 
 对端不在组网里时，排障没有意义，先把它接进来。**NAS 侧不需要任何改动**：`owjdxb` 是 `--network host`
@@ -191,12 +287,101 @@ curl -s -m8 -i -X POST http://<IP>:3456/mcp \
 4. 让它回四个值：组网 IP、ssh 用户名、端口、它的 A2A 根路径。
 5. 拿到值立刻实测 `ssh -i <key> <user>@<ip> 'hostname; date'`，通了再投凭据、再谈业务。
 
+### 接驳脚本写成「组网 IP + 密钥优先，公网 IP + 密码兜底」
+
+对端入网后，SSH 执行器不要只留一条硬编码 IP。按 `[组网IP, 公网IP]` × `[密钥, 密码]` 顺序试，谁先通
+就把实际路径打到 stderr（`[via <ip> <mode>]`）：组网通时连密码环境变量都不用给，组网掉线/公网换 IP 时
+自动回落，而且报错能直接分辨是「路径变了」还是「认证错了」。
+
+```python
+HOSTS = ["100.66.1.9", "43.153.26.131"]   # 组网优先，公网兜底
+for host in HOSTS:
+    for mode in ("key", "pw"):           # pw 只在环境变量有值时才试
+        ...
+```
+
+绑定 IP 变更（重绑、升级、IP 重排）要同步改**三处**：执行器 `HOSTS`、A2A 名册里的组网 IP 行、隧道脚本目标。
+只改一处会留下「某个脚本还打旧 IP」的静默故障。
+
+**装完立刻清对端残留**：安装包（250MB 级）+ 分段 `part*.bin` / `t*.bin` / `range_test.bin` 用完就删，
+别留在对方磁盘上——清完顺手把 `C:\A2A` 之类的目录列一遍，确认只剩仓库和工具链。
+
 **判据细节**：TCP 建连成功但 `recv` banner 超时/为空，**不等于 sshd 没开** —— relay 先 accept 再连后端，
 后端慢或没监听都长这样。banner 只用来认机器；「端口通不通、能不能登录」以 `ssh` 自己的三态为准
 （登录成功 / `Permission denied` = 通但没授权 / `Connection timed out` = 真不通）。
 
+### 组网不是唯一解：有公网 IP 的 peer 直接上反向隧道
+
+「新节点连不进来」先问一句：**它有没有公网 IP？** 有的话不必等组网，先分两个方向测：
+
+| 方向 | 实测 | 含义 |
+|---|---|---|
+| NAS → 对端公网 `:22` | 通 | 通道可以建 |
+| 对端 → NAS | 不通 | NAS 在 NAT 后，这正是它非要组网的原因 |
+
+由 NAS 主动 ssh 过去，把 NAS 的服务反向映射到对端的 `127.0.0.1`：
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -i /opt/data/.ssh/id_ed25519 \
+  -R 127.0.0.1:22022:<NAS>:22 -R 127.0.0.1:23000:<NAS>:3000 \
+  -R 127.0.0.1:23456:<NAS>:3456 -R 127.0.0.1:23458:<NAS>:3458 \
+  <user>@<对端公网IP>
+```
+
+对端随即能用 `git clone http://127.0.0.1:23000/<owner>/<repo>.git`、`http://127.0.0.1:23456/mcp`。
+不占节点小宝免费额度（免费版只 2 台互联，蜂群早超了）、不走 relay 中转、带宽是公网直连。
+Windows 对端同样认 `-R`（OpenSSH for Windows 支持绑 `127.0.0.1`）。
+
+### 重启隧道前先确认旧监听已死：残留监听会「accept 然后挂死」
+
+隧道进程被杀/重启后，对端 sshd 的**转发监听子进程可能残留**并继续占着那个端口。新隧道绑不上（只打一句
+`remote port forwarding failed`，ssh 本身照常活着），而客户端连过去会被**旧监听 accept 然后永远不回数据**——
+症状是「端口在听、TCP 能连、零字节、无报错」，跟「隧道不通」完全不同，很容易误判成协议/防火墙问题。
+
+```powershell
+netstat -ano | Select-String ':2222'    # 记 PID，确认是不是上一轮留下的 sshd 子进程
+Stop-Process -Id <pid> -Force           # 只杀那个监听进程，别动 sshd 服务
+# 重启隧道后再看一次 netstat：监听 PID 必须变
+```
+
+**验收必须用真实业务请求（长连接 / 大数据量），不能用 `ssh -T` 这种一发即回的小请求。**
+小包能穿过旧监听和半死隧道，`git push` 不行——用轻请求验收会把「半个通道」判成「通了」。
+
+### 远端 Windows 上跑长命令：批处理 + 重定向 + 读日志
+
+把 `ssh` / `git` 直接塞进远程 exec 通道（paramiko / `powershell -Command`）会挂：输出被整段缓冲，
+进程又在等 stdin，于是「无输出、无报错、超时」。可靠形态是 `.bat`（ASCII + CRLF，重定向补 `< NUL`）
+由 `.ps1`（UTF-8 BOM）`Start-Process -WindowStyle Hidden` 起，`Start-Sleep` 后 `Get-Content <log> -Tail 8`。
+完整模板见 `a2a-file-bus` → `references/github-mirror-transport.md`。
+
+**Windows 客户端的控制台端口不是 9118。** `9118` 是绿联 NAS（UGOS）内置版专用；Windows 版 `NodeBabyLinkService` 实测监听：
+`127.0.0.1:16880`（管理口，任何路径 404）、`127.66.36.18:2443`（HTTPS）、`127.66.36.18:2080`、`127.0.0.1:2080`。
+`127.66.36.18` 属于 `127.0.0.0/8`，是 Windows 版拿 loopback 别名当虚拟网卡地址，**不是组网 IP**，别把它当成「已入网」。
+判据：**服务在跑 + 16880 在听 + 没有 `100.66.1.x`** = 客户端装了但**没登录账号**（未入网），不是网络故障。
+此时唯一解法是让那台机器用同一账号登录客户端 GUI，别在端口和防火墙上继续查。
+
+**绑定码拿不到就是拿不到，别在本地翻。** `http://<NAS>:9118/` 是一个**纯跳转器**：任何路径（含 POST）都只返回
+`302 Location: https://yc.iepose.com/jdxb_server_pc_v3/?client=…&pid=…&t=…&s=…` 或 `400`，本地**没有**任何
+设备/绑定 API（实测 12 个路径全 302）。设备绑定码只能从云端控制台拿，而控制台要账号登录态 ——
+扫端口、猜路径、POST 探测全是白费。绑定这件事绕不开人：「对端自己读绑定码 → 有账号的人点一下」。
+反过来，`9118` 跳转链接里的 `pid=` 就是该机的 peerid，是**不需要账号**就能拿到的唯一身份信息，
+拿它去铁律 0 的表里对主机名。
+
+**枚举组网成员**：扫 `100.66.1.0/24` 的 22 端口即当前在网清单（relay 模式下 ping 不通属正常）：
+
+```bash
+python3 <skill>/scripts/probe_ports.py $(seq -f '100.66.1.%g' 1 254 | sed 's/$/:22/' | tr '\n' ' ')
+```
+
+新 peer 绑完后再扫一次，多出来的那个 IP 就是它 —— 比翻日志快，也不依赖任何人自报。
+
+**扫到 `3389` 对公网敞开就顺手报一句。** Windows peer 常把 RDP 直接暴露在云公网上，
+发现即提醒 BOSS 加安全组白名单，别当没看见。
+
 ## 诊断流程（按序执行）
 
+0. **三角定位**：从第三节点对同一目标各打一发（`16880` 或业务端口），先分清是「某一对不通」还是「全网不通」。
+   只有一对不通时，故障在那条出向或那台掉线节点，去翻服务端日志是白花时间。
 1. **取权威表**（铁律 0）→ 确认目标 IP 归属主机，确认本机 peerid。
 2. **查该 peer 有没有隧道记录**：
    ```bash

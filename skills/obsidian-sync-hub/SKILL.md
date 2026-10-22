@@ -246,11 +246,60 @@ sqlite3 /data/gitea/gitea.db "DELETE FROM access_token WHERE name='<token名>';"
 | cron | job `b6bffe27b607`，expr `30 18 * * *`（**UTC**，= 北京 02:30，在 dy_sync 之后 1 小时） |
 | 做法 | `git push gitea refs/remotes/origin/main:refs/heads/main` —— 直推 remote-tracking ref，**不碰工作树**：工作树脏（dy_sync 的 overlay 残留）不影响它，也不可能 stage 删除 |
 | 锁 | 与 dy_sync.sh **共享** `/tmp/dy_sync.lock`（同一工作副本，并发 git 会写坏 pack）；撞锁 exit 5 |
-| 安全闸 | 只允许 fast-forward；gitea 若有 GitHub 没有的提交 → exit 1，**绝不 force push** |
+| 安全闸 | 只允许 fast-forward；gitea 若有 GitHub 没有的提交 → exit 1，**脚本绝不 force push**（真分叉的人工修复见下节） |
 | 认证 | `/opt/data/.ssh/gitea-mirror`（600），公钥已注册到 gitea 的 `anc` 账号（title `xiaoka-hermes-nas-mirror`，指纹 `SHA256:k4XU6/aNe3kNH0mIKL1G8BufJ75G2u8DyIkL4qjMius`）；加 key 走 `POST /api/v1/user/keys` |
 | 退出码 | `0` 成功（含「已是最新」）/ `1` 失败 / `5` 撞锁 |
 
 首次镜像实测：`87042e3..d9fae82` fast-forward，1.7 秒，311 对象 / 4.6MB，回源 sha 一致。
+
+### 镜像分叉：诊断与修复（已验证）
+
+cron 报 `fatal: Not a valid commit name <sha>` + `FAIL: 历史分叉`，先分清两种：
+1. **脚本假阳性**：旧版只用 `ls-remote` 拿到 sha 就 `merge-base`，本地根本没有这个对象 → 报
+   `Not a valid commit name`，被当成「分叉」。已修：判祖先前先
+   `git fetch gitea "+refs/heads/main:refs/remotes/gitea/main"`；真分叉时还会打印分叉点 + 两边独有提交数。
+2. **真分叉**：有 agent 直接 push Gitea 绕过了 GitHub 枢纽，两边各自提交。
+
+诊断（裸库探针，不碰 `/opt/data/sync/obsidian-sync` 工作副本）：
+
+```bash
+cd /opt/data/cache/scratch && rm -rf gt_probe && git init --bare gt_probe && cd gt_probe
+GIT_SSH_COMMAND="ssh -i /opt/data/.ssh/gitea-mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+  git fetch ssh://git@192.168.199.2:2222/anc/obsidian.git 'refs/heads/*:refs/gt/*'
+GIT_SSH_COMMAND="ssh -i /opt/data/.ssh/obsidian-sync -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+  git fetch git@github.com:superxzy2012/obsidian-sync.git 'refs/heads/main:refs/gh/main'
+git branch -f gh_main refs/gh/main; git branch -f gt_main refs/gt/main   # 裸库 refs 不在 refs/heads/*，不建分支 clone -b 会拿到空仓
+git merge-base gt_main gh_main     # 分叉点
+git cherry -v gh_main gt_main       # '-' = 内容已在 GitHub（双写重复提交），'+' = 真独有
+git log --oneline gh_main..gt_main  # Gitea 侧独有的到底是哪些
+```
+
+修复（把 Gitea 独有内容搬进 GitHub，再覆盖 Gitea）：
+
+```bash
+cd /opt/data/cache/scratch && rm -rf gt_work && git clone -q -b gh_main gt_probe gt_work && cd gt_work
+git config user.name "xiaoka-bot"; git config user.email "xiaoka@anc"   # 不设 → cherry-pick 报 fatal: unable to auto-detect email
+for c in <每个 '+' 的 sha>; do git cherry-pick $c; done              # 通常无冲突
+git diff --stat gt_main HEAD      # 只能新增/修改
+git diff gt_main HEAD | grep '^-[^-]'   # 必须为空：证明 Gitea 侧没有独有内容被覆盖
+```
+
+再推：GitHub 先（FF），Gitea 后（带 lease 的 force），最后回源核对：
+
+```bash
+flock -w 120 /tmp/dy_sync.lock bash -c 'GIT_SSH_COMMAND="ssh -i /opt/data/.ssh/obsidian-sync -o IdentitiesOnly=yes" git push git@github.com:superxzy2012/obsidian-sync.git HEAD:refs/heads/main'
+flock -w 120 /tmp/dy_sync.lock bash -c 'GIT_SSH_COMMAND="ssh -i /opt/data/.ssh/gitea-mirror -o IdentitiesOnly=yes" git push --force-with-lease=refs/heads/main:<旧 gt sha> ssh://git@192.168.199.2:2222/anc/obsidian.git HEAD:refs/heads/main'
+cd /opt/data/sync && bash gitea_mirror.sh --check      # 两边 sha 必须一致
+```
+
+铁律：
+- **force 只在这条链路里做**，前提是 Gitea 独有提交已 cherry-pick 进 GitHub、且 `git diff` 证明零丢失。
+  跳过这步直接 force = 抹掉别的 agent 的提交（演练报告、入库笔记都是这么丢的）。
+- 双写造成的「重复提交」（内容相同、sha 不同）**不要 cherry-pick**，`git cherry` 标 `-` 的就是它们，
+  照着 pick 会一堆空提交/冲突。
+- force 后必须跑 `--check` 回源，别只看 push 的返回码。
+- **根因防复发**：直接往 Gitea push 的 agent 是分叉源头——Gitea 只做只读镜像，产出统一推 GitHub 枢纽；
+  修完在管理群提一句，否则下一轮又会分叉。
 
 🔴 **已知缺口**：镜像的是 **GitHub 枢纽的内容**，而枢纽里**没有** NAS 本地独有目录 ——
 `15-小卡工作区`(8523 文件)、`OZON`(663)、`00-Business_Layer_OZON`、`01-Research_Layer_AI_Factory`、`08-抖音`。

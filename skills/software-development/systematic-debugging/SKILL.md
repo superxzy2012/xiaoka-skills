@@ -249,6 +249,23 @@ If the user is present, show the ranked list before testing. They may have domai
 - Prefer debugger/REPL inspection when available; one breakpoint beats ten logs.
 - If you add logs, tag every temporary line with a unique prefix such as `[DEBUG-a4f2]` so cleanup is a single search.
 
+### 2b. 有方向性的系统：单方向失败不构成结论
+
+隧道、组网、复制、消息总线、push/pull、server/client 都有方向。**从 A 测 B 失败 ≠ 两者不通**——
+很多系统只允许一端主动发起（网关→客户端、server→client、pull 而非 push），反向被策略白名单拦是设计行为。
+
+宣告「链路不通」前必须：
+
+1. 确认谁是**主动方**（谁能发起连接），从主动方测；
+2. 再从反方向测一次，把两个结果分开汇报（`A→B 通 / B→A 不通`），而不是合并成一句「不通」；
+3. 若两个方向确实不同，把「哪方向要另走旁路」写进结论，别让对方下次又撞同一面墙。
+
+### 2c. 用户说「已经能用了」时，先跑一次最小验证
+
+用户的现场观察往往已经指出了正确方向。此时**不要继续跑完整排障链**，先做一次最小直接验证
+（直接连一次、直接调一次、直接看一眼），30 秒内就能确认或推翻。
+把「用户断言」当假设而不是噪声：它经常直接命中你漏测的那个维度（例如测反了方向）。
+
 ### 3. Verify Before Continuing
 
 - Did it work? → Phase 4

@@ -193,7 +193,16 @@ python3 /opt/data/memories/pick_model.py --list      # 全部档位
 | `openrouter/poolside/laguna-xs-2.1:free` | ✓ | ✓ | ✓ | 21s | 262K | 慢，兜底 |
 | `openrouter/xingchen-agi/xing4.0-29b-a4b:free` | ✗ | ✗ | ✓ | 25s | 262K | 不推荐 |
 | `owbwin/OC · Nemotron 3 Ultra Free` | — | — | — | 21.9s | 128K | 慢一个数量级，仅备源 |
-| `wbfree/global:hy3`、`wbfree/OC · Big Pickle`、`oc/nemotron-3-ultra-free` | 404/403 | | | | | **列表里有，实际打不通** |
+| `wbfree/global:hy3` | ✓ | ✓ | ✓ | 4.1s | 192K | 腾讯混元，中文强，AA 25 |
+| `wbfree/OC · Big Pickle`、`oc/nemotron-3-ultra-free` | 404/403 | | | | | **列表里有，实际打不通** |
+
+### 8.2.1 按智力分选型，不按参数量
+
+AA Intelligence Index 实测排序：`minimax-m3.1-flash` 42 > `deepseek-v4.1-flash` 39.5 > `nemotron-3.5-super-vl` 26.5 > `hy3` 25 > `nemotron-3.5-lightning` 24 > `nemotron-3-ultra-550b` 23。**550B 名字最大、分数最低**，别因为名字或参数量选它。
+
+- **探活会出现假超时**：并发 4 打免费池时慢模型 40s 超时，串行重试 3.5s 就通。判「模型挂了」前**必须串行复核一次**，否则会把可用模型报成不可用。
+- 同一厂商的别名通道会整批死：`wbfree/OC · *` 超时的那天 `wbfree/global:*` 正常 —— 报不可用要带通道名。
+- 完整盘点流程、探活脚本与实测基线见技能 `omniroute-gateway-ops` 的免费模型盘点参考文件（free-model-inventory.md）。
 
 ### 8.3 三种接法（按需要选）
 
@@ -324,7 +333,10 @@ OMNIROUTE_BASE=http://100.66.1.7:20128/v1 JEV_BASE=http://100.66.1.7:8082/v1 sma
 CLI：`jev expert|model|prio|human|accept|all|batch`。
 
 两条纪律：
-- **`accept` 先卡长度闸再语义判**（<30 字符直接 FAIL），否则「好的我马上做」这类空话会拿到中等分蒙混过关。
+- **`accept` 的长度闸是 8 字符，不是 30。** 闸门只负责挡「已完成。」「好的，我马上处理」这类敷衍；30 会把「毛利率 32%，回款周期 45 天。」（18 字，语义分 0.55）100% 误杀，而「短而正确」正是最常见的交付形态。改闸门后必须用六类样本重跑：短·正确 / 短·敷衍 / 长·凑字 / 长·好 / 代码·空壳 / 代码·好——任何一类错了都是闸门错，不是分类器错。
+- **判定口径写 `state`，绝不写 `instructions`。** 想纠正「短答案也算合格」这类偏差时往 `instructions` 里加句子（2 句加到 5 句），会让**所有**样本的 p 值一起塌到 0.0x——连原本 0.82 的好交付都变 0.03，而且不报错。正确位置是 `state` 尾部加一段中文【判定口径】，实测回归通过。
+- **阈值 0.5 不要动。** 实测 0.30–0.50 六档对 10 个样本全部 100% 准确，0.55 开始误杀短正确答案；同一交付物连打 5 次 p 值 sd ≤ 0.02，低分是信号不是噪声。
+- **回归样本必须一例一 `requirement`。** 拿同一条要求（比如「价格指数在哪个菜单」）去判选品分析/脚本这类无关交付，p=0.02 是**判对了答非所问**，不是分类器坏了；共用 requirement 的回归脚本会把「模型正确」误读成「模型失效」，白回滚一轮。
 - **低置信度是特性不是 bug**：`conf<0.5` 时不要硬取 top-1。任务本身模糊（「20 个 SKU 价格异常，涉及财务和后台操作」→ 老钱 0.27 / 小维 0.33 / 小通 0.31）就该回落到协调者或反问 BOSS。
 
 成本：单次 0.4–1.4s / 300–600 tokens，比 LLM 分类（2–5s / 2–5k）便宜一个数量级；但**延迟敏感场景仍别用**（见 9.4）。

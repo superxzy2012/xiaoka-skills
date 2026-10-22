@@ -199,6 +199,15 @@ them, print `msg_type` + body, and pull attachments with
   keeps its credentials in `~/.hermes/.env` and fails with `env file not found` until you pass
   `--env-file ~/.hermes/.env`. Install the probe to a durable path (`~/.hermes/scripts/`, 600)
   when the *other* agent is meant to run it later — `/tmp` will not survive.
+- **A shell wrapper that hardcodes `$HOME/.hermes/...` breaks wherever `HOME` is not the profile
+  root.** The `feishu-at` wrapper resolves both its env file and the probe as
+  `$HOME/.hermes/.env` / `$HOME/.hermes/scripts/…`; in the Hermes container `HOME=/opt/data` while
+  the real files sit at `/opt/data/.env` and `/opt/data/skills/feishu-bot-group-mentions/scripts/`,
+  so it exits `2` with 「读不到 …/.env」. Both are overridable — do not edit the script and do not
+  copy files around:
+  `FEISHU_ENV_FILE=/opt/data/.env FEISHU_PROBE=<skill>/scripts/feishu_mention_probe.py bash <wrapper> <chat_id> <open_id> "<正文>"`
+  Run it with `--dry` first to confirm all three args parse, then send; judge delivery by the
+  `message_id` + `mention ok -> ou_…` lines it prints, which is the outbound half only.
 - **Never `grep FEISHU_ <env>` raw while diagnosing.** The app_secret prints in full into the
   tool output, and tool output is persisted in `state.db` and session archives — a worse
   exposure than the `600` env file it came from. Mask it: `grep -E "^FEISHU_" <env> | sed "s/=.*/=<set>/"`.

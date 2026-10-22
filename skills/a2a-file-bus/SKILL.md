@@ -183,6 +183,15 @@ rsync 两端都加 `--exclude ".smbdelete*"`，否则 macOS/SMB 的临时删除�
 **端到端验收**：任务里放 `nonce`，回执必须带同一个 nonce。只有「NAS 写任务 → peer 领走 →
 回执带 nonce 回到 NAS 共享根」这条完整往返才算打通；单看 `git push` 成功或群里回了消息都不算。
 
+## Windows peer 入列（`C:\A2A`）
+
+Windows 上的 agent 自报「连不上总线」时，先分开三件事：根目录、凭据、网络。
+
+- **根目录是协议规定的 `C:\A2A`**，不是 agent 自己起的 `C:\Users\Administrator\<repo>` 之类。它按自选目录 clone 完，后续所有 peer 的路径假设都会错位。
+- **凭据投 `C:\Users\Public\<name>-creds.txt`**：Public 对本机所有用户可读、写入不需提权。**不要**投到 agent 的私有 profile 目录——受限账号读别的用户的 `C:\Users\<name>\` 是拒绝访问（这是设计，不是故障）。写入走 base64 → PowerShell `[IO.File]::WriteAllBytes`，写完**回读三个字段**（`user` / `pass` / `clone_url`）确认，别只看 exit 0。
+- **Windows 在 LAN 内就用 LAN 地址**（`192.168.199.2:3000`），组网 IP（`100.66.1.x`）在它那儿常常没有路由——但这是「可能」，不是结论：从它机器上实测两个地址的 3000 端口，再决定用哪个。
+- **交付时说明 Public 是公共可读目录。** 内网可接受；要更严就改成一次性发完即删，或改用 deploy key（`nas-gitea-ops` §7）让密钥根本不落地。
+
 ## 凭据投递（secrets/，不走信封正文）
 
 PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文。实操有三个坑：
@@ -216,4 +225,62 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
 - Permission/escalation detail: `remote-host-admin-escalation` →
   `references/hermes-container-boundary.md`.
 - MCP token 签发（版式 / 指纹 / 回执 / 两句必说的实话）：`references/mcp-token-issuance.md`
+- 远端 worker 接入（Windows peer 的脚本、幂等、验证方式）：见下 §已接入的远端 worker
+- GitHub 公开脱敏镜像（SSH over 443 判据表、部署密钥、代理回退、补推）：见下 §GitHub 公开镜像
+  + `references/github-mirror-transport.md`
 - Chat-side handshake (who to @, proving the mention landed): `feishu-bot-group-mentions`.
+
+## 已接入的远端 worker（照抄即可）
+
+| agent | 位置 | 触发 | 脚本 | 投递 |
+|---|---|---|---|---|
+| 小豆 | Windows `10_4_4_16`，组网 `100.66.1.9` | NAS cron `fdaa4c3b5d57` 每 5 分钟经组网 SSH 跑 `C:\A2A\xd_worker.ps1` | `/opt/data/scripts/xd_a2a_worker.sh` | `a2a_dispatch.py --to xiaodou --cmd "..."` |
+| winpc | 公司 Windows `DESKTOP-4PV5HTQ`，组网 `100.66.1.4` | **机器自己**的计划任务 `A2A-Worker-winpc`（`/ru SYSTEM`，每 5 分钟） | `C:\A2A\win_worker.ps1` | `a2a_dispatch.py --to winpc --cmd "..."` |
+
+两种触发模式的选法：**能直连到机器且它常在线 → 用 NAS cron 推**（小豆，可集中改脚本、可观测）；**机器自己就在组网里且你不该把 NAS 变成调度单点 → 用机器本地计划任务**（winpc）。后者不在 NAS 侧留 cron，验收只能靠回执时间戳。
+
+- worker 逻辑：`git pull --rebase --autostash` → 扫 `inbox/task_*.json` 取 `to=<自己>` → 已有 `outbox/receipt_<ref>_<id>.json` 就跳过（幂等）→ `detail.cmd` 用 `cmd /c` 执行 → 写回执 `status/note/detail.output`（截断 2000 字）→ commit+push（非快进则 `pull --rebase` 重试 3 次）。
+- 模板：`windows-remote-access` 的 `templates/a2a_worker.ps1`（含幂等、重试、日志），改 `__AGENT_ID__` 即可用。
+- `.ps1` 编码：**纯 ASCII 脚本不需要 BOM**（写 CRLF 即可）；**含中文才必须带 UTF-8 BOM**，否则 `powershell -File` 按 ANSI 解，中文变乱码。脚本里先把 `C:\A2A\git\cmd` 前置进 `$env:PATH`，否则任务里调不到 git。
+- **计划任务以 SYSTEM 跑时，git 配置必须写在 `--system` 级**（`credential.helper` / `user.name` / `user.email` / `safe.directory`）——SYSTEM 的 `%USERPROFILE%` 是 `system32\config\systemprofile`，读不到交互用户的 global config；漏 `safe.directory` 直接 `dubious ownership` 拒跑。
+- **机器本地计划任务的验收 = 手工 `schtasks /run` 一次 + 看日志 + 回 NAS 拉总线读回执正文**，三步都要。只看任务状态 `Running` 或只看日志里 `pushed:` 都不算——push 可能推到别的分支或回执字段缺失。
+- 验证自动化是否真的在跑：投一条带 `echo <标记>` 的任务，**不要手工触发 worker**，等 5 分钟看回执时间戳。
+
+## GitHub 公开镜像（脱敏只读镜像 + SSH over 443）
+
+**传输优先级：SSH over 443 > HTTPS + 代理。** GitHub 的 **22 口不通**、`github.com` 的 HTTPS git 传输直连会挂，
+但 **`ssh.github.com:443` 直连即通** —— 这是唯一稳定、且不需要把 token 拼进命令行的路。判据表与配方见
+`references/github-mirror-transport.md`。
+
+- 小豆（云 Windows）侧：**读写都走 HTTPS + HTTP 代理隧道**——NAS 侧 `-R 127.0.0.1:27891:<NAS_IP>:7891`，peer 侧
+  `git config --global http.https://github.com/.proxy http://127.0.0.1:27891`。实测 `curl` 两个端点都 200、
+  `git ls-remote` / `fetch` / `pull --ff-only` / **`git push` 全 exit 0**，远端分支真的出现、commit author 是 peer 自己的身份。
+  SSH 隧道（`127.0.0.1:2222` → `ssh.github.com:443`）**只保证认证面**：`ssh -T` 秒回 `Hi <owner>/<repo>!`，
+  但 `git` 数据面（`ls-remote`/`push`）会挂死、`git.exe` 常驻不退 —— 所以**写不要走 SSH，走 HTTPS + 代理**。
+  认证面与数据面必须分开测：`ssh -T` 成功不代表写通道可用，`git push` 挂也不代表 SSH 被墙。
+- **peer 侧的 HTTPS 写凭据只落 `.git-credentials`，且只能 SFTP 直写。**
+  `credential.helper = store --file=C:/A2A/.git-credentials`，文件用 `icacls <file> /inheritance:r /grant:r Administrator:F SYSTEM:F` 收紧；
+  传输走 SFTP 直写文件，token 绝不拼进命令行 / heredoc / `.bat` 字面量，脚本里只允许打印 `tok[:4] + "***"`。
+  同时把 peer 的提交身份固定成它自己（`user.name=<peer>`、`user.email=<peer>@mesh`），否则所有推送都记在 owner 名下，事后分不清是谁写的。
+- **classic PAT 的 `public_repo` 就够推公开仓**（够用且比 `repo` 窄）；fine-grained PAT **无法用 API 创建**，只能网页点，别答应用户「我帮你造一个」。
+  接单前先报清爆破面：`gh api user --jq '.public_repos'` 拿到公开仓数量，并明说这把 token 能改删的是这几个仓、吊销会连带本机 `gh` 一起失效。
+- **peer 写通道的验收 = 真推 + 立即清理。** `PUSH_EXIT=0` 只证明代码路径，不证明通道可用：推一个 `<peer>/ping`
+  测试分支 → `gh api repos/<o>/<r>/commits/<sha> --jq '.commit.author'` 确认作者是 peer 自己的身份 →
+  `gh api -X DELETE repos/<o>/<r>/git/refs/heads/<peer>/ping` 删远端 → peer 侧 `checkout main` + `branch -D`，
+  最后 `git status` 干净才算完。少一步都会在真任务上翻车。
+- **peer 只推自己的命名空间分支**（`<peer>/*`），不直推 `main` —— `main` 由 NAS 镜像统一写，两边同时写必然打架。
+- **重启反向隧道后先清幽灵监听，再判断通道死活。** 旧 sshd 子进程仍 `LISTEN` 在被转发端口上时，新连接
+  TCP 握手成功然后**零字节**——和「代理坏了 / 密钥错了」表现一模一样，白查一轮。固定流程：peer 侧按端口杀监听
+  进程 → `stop` → `start` → 回 peer 确认监听 PID 已换。
+- 同步器 `a2a_gh_mirror.py`：Gitea 私有完整总线 → GitHub 公开仓，只搬 `DOC_ALLOW` 白名单文档 + 名册 + 任务索引，IPv4/密钥/token 正则打码，泄漏自检不过就中止。
+- 幂等靠「用 Gitea HEAD 的 `%cI` 当时间戳」，否则每轮都产生空 commit。
+- **HTTPS 回退**（SSH 不可用时）：`api.github.com` 通、`github.com` 的 git 传输直连会挂，需显式走代理
+  `-c http.https://github.com/.proxy=http://192.168.199.2:7891`。代理路线会偶发 TLS `handshake failed`、卡满超时，不要当主路。
+- **每个仓挂自己的部署密钥**，镜像器用 `GIT_SSH_COMMAND` 指私钥：
+  `gh api -X POST repos/<o>/<r>/keys -f title='nas-mirror (write)' -f key="$(cat x.pub)" -F read_only=false`，
+  然后 `ssh://git@ssh.github.com:443/<o>/<r>.git` + `GIT_SSH_COMMAND="ssh -i <key> -p 443 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20"`。
+  这样 token 不再出现在 argv / 进程参数 / 日志里，`ps` 拿不到凭据；写权限按仓授予，比全权限 PAT 收得紧。
+- 内容没变但上轮 push 失败过 → 必须比较本地 HEAD 与 `ls-remote` 再补推；否则会一直 NOCHANGE 而远端停在旧版本。
+- 所有 git 调用要带超时并捕获 `TimeoutExpired`（代理会 TLS handshake failed / 卡 120s），否则 cron 直接 exit 1。
+- **cron 载体用 flock 串行，但 `timeout` 只杀包装层。** `timeout 200 sh wrapper.sh` 超时后 python 子进程可能残留并继续持锁，下一轮 `flock -n 9` 直接静默 exit 0——表现是「跑成功、没输出、内容没变」。排障顺序：`ps -eo pid,args | grep '[a]2a_gh_mirror'` 找残留 → 按 PID `kill -9`；**不要用 `pkill -f <pattern>`**，它会把这条 bash 命令行自身也匹配上，把自己 SIGTERM 掉（exit -15），看着像脚本被杀。
+- **判定 cron 是否真成功看 job 的 `last_status` / `last_error`，不要只看脚本 stdout。** 修好之后、下一轮跑之前，job 里仍挂着上一轮的 error；反过来 stdout 静默也可能是 flock 让路而非成功。

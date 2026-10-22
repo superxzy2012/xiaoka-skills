@@ -96,6 +96,8 @@ For a bus mirror use `auto_init:false` (leave it empty; the pushing side populat
 (idempotent-safe, treat as success). Random password: `"".join(secrets.choice(string.ascii_letters+
 string.digits) for _ in range(20))` — exclude `@ : #` and spaces so it survives in clone URLs.
 
+**蜂群内部 peer 直接 `--admin`。** `gitea admin user create --username <login> --email <login>@a2a.local --admin --must-change-password=false`：admin 自动对**所有**私有仓有读写，不必再逐个 `PUT …/collaborators` 授权，也不受 `allow_create_organization` 之类新用户默认值困扰。代价是它能看见全部仓库，所以**一个 peer 一个账号**（便于单独吊销、审计谁推了什么），不要多人共用一个号。给外部/半信任方仍走 §3 的 collaborator + §7 的 deploy key 最小授权路线。
+
 ### 3) Grant write
 `PUT /api/v1/repos/<owner>/<repo>/collaborators/<login>` → `{"permission":"write"}` → 204.
 
@@ -174,6 +176,132 @@ git push gitea main --all && git push gitea --tags
 ```
 Then a `sync.sh` adds the Gitea remote as a second push target for ongoing dual-sync.
 
+### 历史分叉（镜像任务报失败）的收敛流程
+
+症状：`fatal: Not a valid commit name <sha>` + `FAIL: 历史分叉 —— gitea(x) 不是 GitHub(y) 的祖先`。
+
+**先分清两种假象：**
+
+1. **本地没有对象 ≠ 分叉。** 只跑 `git ls-remote gitea refs/heads/main` 拿到 sha 就 `merge-base`，
+   本地没有该 commit，git 直接报 `Not a valid commit name`，被误判成历史分叉。
+   判前必须 `git fetch gitea "+refs/heads/main:refs/remotes/gitea/main"`。
+2. **真分叉要用 `git cherry` 分类，不能按提交数直接覆盖。**
+   `git cherry -v <github> <gitea>`：`-` = 内容已在上游（双写/重复提交，sha 不同），`+` = 真独有。
+   只搬 `+` 的那些，否则会把别人的工作抹掉。
+
+收敛步骤（实测，零冲突）：
+
+```bash
+# 1. 临时裸库收两边对象
+mkdir probe && cd probe && git init --bare -q .
+git fetch <gitea-url> 'refs/heads/*:refs/gt/*'
+git fetch <github-url> 'refs/heads/main:refs/gh/main'
+# 2. 分叉点 + 两边独有数
+git merge-base refs/gt/main refs/gh/main
+git rev-list --count refs/gh/main..refs/gt/main   # gitea 独有
+git cherry -v refs/gh/main refs/gt/main          # - 重复 / + 真独有
+# 3. 在工作树里把 + 的提交 cherry-pick 到 GitHub main 之上，push GitHub
+# 4. 确认两边内容一致后，force 覆盖 Gitea（内容已保全，force 才安全）
+git push --force-with-lease=refs/heads/main:<旧gitea_sha> <gitea-url> HEAD:refs/heads/main
+# 5. 回源验证：fetch gitea main，rev-parse 应与 GitHub 相同，并 git show 抽查文件内容
+```
+
+**force push 前必须先证明 Gitea 侧零独有内容**：`git diff <gitea> <github>` 里不能有纯删除行
+（`git diff … | grep '^-[^-]'` 为空），只有新增/替换才安全。
+
+**无法用 pre-receive 闸门按账号拦推送**：NAS Gitea 上 `public_key` 全属 `owner_id=1`（`anc`），
+`mac-jarvis-nas-tm` / `xiaoka-hermes-nas-mirror` / `jarvis-xf-cloud` / deploy key 混在一起，
+pusher 名字都是 `anc`。**但可以按 key 拦** —— 见下一节。
+
+### 用 pre-receive.d 按 SSH key 做只读镜像闸门（实测有效）
+
+Gitea 在 hook 里注入的不只是 pusher 名，还有 key id：
+
+```
+GITEA_KEY_ID=2              # public_key.id，用户 key 推送时
+GITEA_DEPLOY_KEY_ID=0       # deploy_key.id，deploy key 推送时非 0
+GITEA_PUSHER_NAME=anc       # 账号名（同账号下分不出人，别用它）
+GITEA_PUSHER_ID / GITEA_PUSHER_EMAIL / GITEA_REPO_NAME / GITEA_REPO_USER_NAME / GITEA_REPO_ID
+```
+
+`hooks/pre-receive.d/<name>` 里的脚本能读到**完整 stdin**（`old new ref` 逐行），所以能精准做到
+「哪个 key 能改哪个分支」。落点（宿主机）：
+`/home/DY/gitea/data/git/repositories/<owner>/<repo>.git/hooks/pre-receive.d/<name>`，`chmod +x`，
+**无需重启容器**。传脚本用 base64 管道（`echo <b64> | base64 -d > f`），别用嵌套引号 heredoc。
+
+最小闸门（只让镜像 key 写 main，deploy key 一律拒）：
+
+```sh
+#!/bin/sh
+ALLOWED_KEY_IDS="2"          # 2 = xiaoka-hermes-nas-mirror
+reject=0
+while read -r old new ref; do
+  case "$ref" in
+    refs/heads/main|refs/heads/master)
+      ok=0
+      case "$GITEA_KEY_ID" in
+        "") ok=0 ;;
+        *) case " $ALLOWED_KEY_IDS " in *" $GITEA_KEY_ID "*) ok=1 ;; esac ;;
+      esac
+      [ "${GITEA_DEPLOY_KEY_ID:-0}" != "0" ] && ok=0
+      if [ "$ok" != "1" ]; then
+        echo "❌ 拒绝：main 是 GitHub 枢纽的只读镜像分支（你的 key_id=$GITEA_KEY_ID）" >&2
+        echo "   请推 git@github.com:superxzy2012/obsidian-sync.git，规则见 A2A/GIT-推送规约.md" >&2
+        reject=1
+      fi ;;
+  esac
+done
+exit $reject
+```
+
+验证拦截时**必须真推**：`git push --dry-run` 只走认证/权限协商，**不触发 pre-receive**（实测
+白名单故意改错，dry-run 仍 RC=0）。真推被拒后立刻 `git ls-remote` 确认远端 sha 未变，再用白名单
+key 真推一次证明放行，最后 `--force-with-lease=<旧sha>` 回滚探针提交。
+
+**hook 里不要写 `/tmp`** —— Gitea 在容器内，`/tmp` 与宿主隔离，日志会“消失”。写 `/data/...`
+（= 宿主 `/home/DY/gitea/data/...`）。
+
+查 key 清单（决定白名单）：
+
+```bash
+sudo -n docker exec -u git gitea sqlite3 /data/gitea/gitea.db \
+  "SELECT 'PK',id,owner_id,name FROM public_key UNION ALL SELECT 'DK',id,repo_id,name,CAST(mode AS TEXT) FROM deploy_key;"
+```
+
+`owner_id=0` 的 public_key 也能正常推送，别据此排除；以 `name` 认人。新增镜像/agent key 后只需把
+id 加进 `ALLOWED_KEY_IDS`，不用改任何 agent 的配置。
+
+### 防误删：只增快照 + 每日校验（**不要做双写**）
+
+需求「两个库互为备份、一个删了另一个还在」**不能用双向写实现**：
+
+- 正常删除也会被双写：删文件 → 推 GitHub → 推 Gitea，两边同时没了。
+- 「保留多的那个」= 无人值守 force push，判错一次就静默丢一边的真实工作；
+  「多」≠「对」（多出来可能是垃圾，少的那边可能是清理过的正确版）。
+- N 个 agent × 2 个远端 = 2N 条写入路径，rebase 时机不同 → 分叉概率随 agent 数线性上升。
+- 出网不对称：Gitea 内网可达、GitHub 需出网，双写必然一边成功一边失败 → 立刻分叉。
+
+**正确解法：写入保持单一路径（GitHub 主库 → Gitea 只读镜像），另加只增快照。**
+
+脚本 `/opt/data/scripts/obsidian_backup.sh`（cron `96206f3774fd`，每天 19:10 UTC = 北京 03:10，
+排在镜像 02:30 之后）：
+
+1. 备份裸库 `/opt/data/backup/obsidian-sync.git`（volume1，与 vault 的 volume2 **不同物理盘**），
+   `git fetch` GitHub 全 refs（heads + tags），增量只传新对象。
+2. 每天给 main 打 `daily/YYYY-MM-DD` tag，并把 tag 推到 Gitea。
+   → GitHub 被 force push / 删库，Gitea 与备份库仍有可完整检出的历史点；
+   tag 不受 main 闸门限制（钩子只拦 `refs/heads/main|master`），**tag 永不删除**。
+3. 校验：GitHub main vs Gitea main 的 sha + 文件数，区分「Gitea 落后（镜像没跑）」/
+   「Gitea 超前（有人直推）」/「历史分叉」；再与昨日 tag 比增删，单日删除 >20 个或 >5% 就 ⚠️ 告警。
+
+找回：`git --git-dir=/opt/data/backup/obsidian-sync.git show daily/2026-10-22:<路径>`。
+
+脚本坑：① `timeout` **不能执行 shell 函数**（`timeout 420 g fetch` 报 rc=127），必须写全
+`timeout 420 git --git-dir="$BK" fetch`；② 取昨日 tag 要 `grep -vx "$TAG"`，否则同一天重跑时
+PREV==TAG，对比逻辑失效；③ 告警已在正文用 ⚠️ 标出，**退出码必须 0**，否则 cron 把正常告警判为运行失败；
+④ 同一天 main 会前进多次，tag 推 Gitea 必须加 `--force`，否则第二次报
+`Updates were rejected because the tag already exists in the remote`。
+
 ## Pitfalls
 
 - **Read the live state before provisioning — a concurrent session may have already done it.**
@@ -203,6 +331,9 @@ Then a `sync.sh` adds the Gitea remote as a second push target for ongoing dual-
   with an explicit end-state assertion (`count(*)` of the table back to baseline, token table back to
   only pre-existing rows) and re-run the cleanup loop if it fails — an aborted `set -e` chain looks
   identical to a clean run from the outside.
+- **「连不上 Gitea」十有八九是认证，不是网络——分层测，别接对方的结论。** 顺序：① 从**对端机器**测 TCP（`Test-NetConnection <host> -Port 3000` / `nc -z <host> 3000`），通就排除了网络；② 用对端要用的凭据真跑一次 `git clone`，判据是**报错原文**——`remote: Failed to authenticate user` / `fatal: Authentication failed` 是认证，`Connection timed out` 才是网络；③ 认证失败就查 `SELECT id,name,is_admin,is_active FROM user`。
+  **凭据清单文件存在 ≠ 账号存在。** 一份 `a2a-bus-creds.txt` 里可以列着五个 peer 的账号名而库里只有 `anc` 一个（建号那轮把行写进了文件、建号本身失败，或实例被重建过）；文件里的密码无从验证，唯一真相是 `user` 表。遇到「peer 说连不上」先查表，别先改网络配置、别急着加路由。
+  `gitea admin user list --admin` 可能直接 exit 1 且零输出——别据此判断「没有用户」，改查 sqlite。
 - **Probe reachability from the target's own network before designing the delivery path.**
   "The peer can't reach the NAS" is usually an assumption. From a cloud mesh node, `100.66.1.7`
   answered on 3000 / 2222 / 3022 and returned an SSH banner — which is what made the deploy-key route

@@ -60,3 +60,10 @@
 - ✅ A2A 总线 (GitHub superxzy2012/a2a-bus)：全通，cron */5，冲突兜底已加
 - ✅ 云端→NAS MCP：100.66.1.7:3456 (obsidian) / :3458 (skillbox) 全 200
 - ⏳ 雷神/绿巨人总线接入：SMOKE 任务已投递，等回执
+
+## 小豆-新Hermes 网络自报（2026-10-21，待核实）
+- 云端 VPS 公网 43.153.26.131（腾讯云段），内网 10.4.4.16/网关10.4.4.1
+- 主机名 10_4_4_16，用户 Administrator，sshd 22 仅密钥
+- NodeBabyLinkService v4.3.5 已装（精简版，wintun 就绪），异地组网 IP 未分配
+- 请求：小卡用 BOSS 的节点小宝账号点绑定链接 + 给小卡 pubkey
+- 状态：**未执行**。等 BOSS 授权（涉私有组网边界 + 需 BOSS 账号）
