@@ -32,7 +32,7 @@ $SSH 'sudo -n docker ps'
 - 用户 `DY`（uid 1005，组 admin/users），**免密登录**。root/admin/xiaoka 都不行 —— 别浪费轮次试。
 - `sudo -n` **只**免密 `/usr/bin/docker`，其他命令要密码。
 - 改宿主文件（/etc、/var/spool/cron 等）：`sudo -n docker run --rm -v /etc:/etc alpine sh -c '...'`。
-- 路径映射：容器内 `/opt/nas/volume2` = 宿主 `/volume2`。宿主 crontab 在 `/etc/cron.d/`、`/var/spool/cron/crontabs/root`。
+- 路径映射：容器内 `/opt/nas/volume2` = 宿主 `/volume2`。**本 agent 自己的家目录 `/opt/data` = 宿主 `/volume2/hermes/data`**（属主 `hermes` uid 10000，`DY` 进去 Permission denied）—— 要把本机已装好的东西给 root 容器用，直接按宿主路径挂，docker 以 root 读得到，不必先复制。宿主 crontab 在 `/etc/cron.d/`、`/var/spool/cron/crontabs/root`。
 
 ## 二、必踩的坑
 
@@ -55,7 +55,23 @@ $SSH 'sudo -n docker ps'
    判据只有一条：**退出容器后从宿主侧回读**（`ls` / `md5sum` 比对）。
    这个坑在「用 root 容器绕开权限写文件」时最容易踩 —— 容器内一切看起来都正常。
 
+5. 🔴 **`sudo -n` 的免密是按命令粒度的，不要用 `sudo -n true` 的成败判断能不能跑 docker。**
+   `sudo -n true` 失败只说明「true 不在免密列表」，与 docker 无关；正确探针是 `sudo -n docker version`。
+   同理：**别因为 `DY` 不在 docker 组、裸 `docker ps` 报 permission denied 就断定「只能让 BOSS 自己跑」** ——
+   `sudo -n docker compose up -d --build`、`sudo -n docker compose logs` 都是 docker 子命令，走同一个免密二进制，通常直接可用。
+   先试一次再决定要不要把活推回给用户。
+
+6. 🔴 **改容器内镜像自带的文件，只能 volume 挂载或写进已挂载的启动脚本；`docker cp` 会被重建还原。**
+   `docker compose up -d`（哪怕没加 `--force-recreate`，只要镜像/配置变了）会用镜像内容重建容器层，
+   之前 `docker cp` 进去的 asar / 静态资源 / 软链 / 账户数据**全部消失**，而 UI 可能还在缓存旧列表，
+   于是表现为「昨天明明升级过，今天功能又没了」——这种「假升级」最耗排查时间。
+   - 镜像内文件 → compose `volumes:` 挂宿主文件（`:ro`），校验**容器内** `md5sum` 等于宿主那份。
+   - 运行时才产生的东西（软链、中继进程、环境变量）→ 写进 compose 挂载的 `start.sh`，每次启动重建。
+   - 应用自己的数据目录 → 先 `docker exec <c> ls -la <datadir>` 确认真实路径（版本升级常换位置），再挂。
+   - 判据永远是**重建后回读**（md5 / 软链 / 数据文件存在），不是「上次改成功了」。
+
 ## 三、部署前预检
+
 
 ```bash
 $SSH DY@192.168.199.2 'sudo -n docker ps --format "{{.Names}}\t{{.Image}}\t{{.Status}}"'   # 已占用容器
@@ -522,6 +538,46 @@ python nas_cdp.py bilibili <url>
   后来才发现它是「飞书 → 手机」链路的必需中间层，得重装。
 
 完整配方（env 清单、CLOUD_MODELS 示例、e2e 五步、能力边界表）见 `references/self-hosted-relay-hub.md`。
+
+### 5.10 又一例：独立 Claude Code 容器（接自建模型网关）
+
+BOSS 说「我想装独立的 claude」= 要**不随本 agent 容器生命周期消失**的独立容器，不是再装一份到 `/opt/data`。
+
+- 🔴 **`claude` 必须在镜像里 `npm install -g`，不要只读挂载宿主的单个二进制。**
+  挂载能让 `claude --version` 正常打印，但**它找不到自己同目录的资源/插件目录，工具集被裁剪** ——
+  表现是模型只会聊天、说「我没有 Bash 工具」，容器里 `which rg git` 全空。
+  npm 默认拦 postinstall，不加参数会缺原生组件（`--version` 报缺 native module），正确写法：
+  ```dockerfile
+  RUN npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@<pin>
+  ```
+  代价是镜像 +280MB，比排查「模型为什么不干活」便宜得多。
+- 🔴 **别在 Dockerfile 里 `apt-get install`。** 构建卡十几分钟不是拉镜像慢
+  （`docker pull node:20-bookworm-slim` 实测 7 秒），是 Debian 源在国内慢。
+  `server.js` 只用 node 内置模块、Claude Code 自带 ripgrep → 整段删掉，构建降到 1–3 分钟。
+  真需要 git 再按需装，别为「可能要用」先付这笔时间。
+- 🔴 **模型必须按 Claude Code 的工具协议逐个实测，智力分不作数。**
+  API 层 `/v1/messages` 返回 `tool_use` **不等于** Claude Code 里能调工具 —— 实测 `mac8081/*` 全系
+  （GLM-5.3 / GLM-5.3-thinking / Qwen3-Coder）在 API 层 tool_use 正常，装进 Claude Code 只聊天不动手。
+  判据只有一条：让模型用 Bash 写一个文件，**回读文件内容**，不信它嘴上说「已完成」。
+  同一容器先跑一个已知可用模型作对照，对照也失败才是容器环境问题、不是模型问题。
+  `unrecognized_model` / `Unknown model` 警告对非 Anthropic 模型名是正常的，别被它带偏去换模型。
+  实测矩阵与探针脚本见 `scripts/cc_model_probe.sh`。
+- 🔴 **改 Dockerfile 必须单独重传并重建镜像**：`up -d --force-recreate` 只换容器不换镜像，
+  build 上下文没变还会命中缓存。判据 `docker exec <c> which claude` 为空 = 镜像里根本没有。
+- 🔴 **Docker 容器里 Claude Code 交互模式会强走 OAuth 打 `api.anthropic.com`，完全忽略 `ANTHROPIC_BASE_URL`**，
+  必须走 headless `claude -p "..."`。而 headless 无交互批准 → Bash/Write 全被权限系统拦，
+  必须加 `--dangerously-skip-permissions`，代价是「拿到访问口令 = 拿到容器内 shell」，因此只允许内网 + 强口令。
+- **OmniRoute 原生支持 Anthropic `/v1/messages`**（`x-api-key` + `anthropic-version: 2023-06-01`），
+  `ANTHROPIC_BASE_URL=http://192.168.199.2:20128` 即可，**不需要**上游方案里的 `https://api.deepseek.com/anthropic`，也不用再买官方 key。
+- 上游 `fubob13013-afk/nas-claude-code` 的 `docs/deploy-guide.md` 确实是按绿联 DXP4800 写的（含 18 条坑），
+  但**参数是作者那台机器的**（IP、管理用户、端口 3000、8G 内存）。BOSS 说「要那个匹配 DXP4800 那个」时，
+  正确回应是**用它 + 列差异表**，而不是自创一套 —— 逐项列出「原版 → 你这台 → 处理」，并说明指南 18 条坑里哪几条会踩、已如何堵住。
+- 上游 `server.js` 用 `exec` 拼接字符串（命令注入/RCE）→ 改 `execFile`；无鉴权 → 加 `CC_TOKEN`（未带 401）；
+  模型硬编码 → 读 `ANTHROPIC_MODEL`。上游 `pkill -f "node server.js"` 会连自身 shell 一起杀（exit -15），清理用 `kill -9 <pid>`。
+- **交付形态：写一个 `deploy.sh`（build → up → 轮询 `/health` → 打地址和口令），BOSS 只跑一条命令**，
+  不要给一串分步命令让他拼。
+
+完整配方（Dockerfile / compose / server.js 改造点 / 验收清单）见 `references/claude-code-container.md`。
 
 ## 六、汇报给 BOSS 时
 
