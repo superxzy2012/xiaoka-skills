@@ -107,6 +107,18 @@ string.digits) for _ in range(20))` — exclude `@ : #` and spaces so it survive
 repo is still public — the patch did not apply or was applied to the wrong owner.
 
 ### 5) Verify write access for a given account (do NOT trust ls-remote/clone)
+
+先做一次一调用的权限快照——比读协作者列表可靠：
+
+```bash
+GET /api/v1/repos/<owner>/<repo>/collaborators/<login>/permission
+# → {"permission":"write","role_name":"write","user":{...}}   ；404 = 压根没有这个协作者
+```
+
+`GET …/collaborators` 列表里每行的 `permissions` 字段常为 `null`，**那不是「没权限」**，别据此下结论；
+要角色就读 `/permission` 子资源。顺手把这轮协作者清单看一遍：出现不认识的 login（别人加的探针号、
+平台默认账号）要点名问，而不是默默放过。
+
 ls-remote and clone only prove READ. To prove WRITE, prefer `--dry-run` — it still runs
 `receive-pack` server-side (so a missing write permission fails here) but lands nothing, so there is
 no test branch to clean up:
@@ -366,6 +378,14 @@ PREV==TAG，对比逻辑失效；③ 告警已在正文用 ⚠️ 标出，**退
   first push lands; populate before announcing the clone URL.
 - **ls-remote/clone prove READ, not WRITE** — `push --dry-run` (or a real temp-branch push) is the
   only write proof; a collaborator API 204 is not.
+- **真推探针时 `git commit -a` 不含未跟踪文件。** 新建的探针文件是 untracked，`commit -a` 报
+  `nothing added to commit but untracked files present`，`&&` 链断在 commit，push 根本没跑，rc=1 ——
+  看起来像「写权限被拒」，实际什么都没试。先 `git add -A` 再 commit；判失败要读 push 的 stderr，
+  不能只看退出码。
+- **凭据文件格式会漂移，别按一种格式硬解析。** 同一个 `a2a-bus-creds.txt` 里可能同时存在
+  `<login>\t<pw>\t<note>` 的行和 `[<login>]` 段内的 `user=` / `pass=` / `scope=` 键值块（不同脚本先后
+  写过）。只认 `login=user:pw` 会得到 `creds not found`，进而误判成「凭据丢了」并去重建账号。
+  解析前先打印结构（`split("=")[0]` + 长度，不打印值），再按块取值。
 - **Don't deliver passwords in chat or group** — Feishu bot-to-bot DM is blocked (code 230013), and a
   ledger `open_id` borrowed from another app's view fails with `99992361 open_id cross app` (send a
   one-message probe before designing a delivery path around a DM). Store in a 600 file and hand the

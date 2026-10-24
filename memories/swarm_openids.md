@@ -67,3 +67,8 @@
 - NodeBabyLinkService v4.3.5 已装（精简版，wintun 就绪），异地组网 IP 未分配
 - 请求：小卡用 BOSS 的节点小宝账号点绑定链接 + 给小卡 pubkey
 - 状态：**未执行**。等 BOSS 授权（涉私有组网边界 + 需 BOSS 账号）
+
+## 2026-10-23 QUEEN open_id 交叉核对
+- 小卡本 app 实测收到 QUEEN/星期五 的 sender：`ou_b172b28aa8416f7fca826bc151b9cbb8`（gateway.log 14:42:36 原文，sender=bot:ou_b172...）
+- QUEEN 自报 `ou_cec7da8fb7c87ba06dcb4b2110c9ede1`：**作为 `<at user_id>` 输入可用**，飞书会自动 canonicalize 成 `ou_b172b28aa8416f7fca826bc151b9cbb8`（2026-10-23 实测：两个 id 同时 @，mentions 两项 id 都回落 ou_b172...，tenant 1acb5ce38507dc9e）。身份比对/白名单仍用实测值，@ 用哪个都行。
+- 我读不到群历史（230027 缺 im:message.group_msg），群内 @ 关系只能靠 gateway.log 事件流 + 总线

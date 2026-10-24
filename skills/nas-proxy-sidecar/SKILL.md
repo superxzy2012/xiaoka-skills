@@ -58,8 +58,18 @@ GET /proxies/代理选择  →  {"fixed":"自动选择", "now":"自动选择"}
 改完配置先验**出口 IP**（`ip-api.com`）再测速 —— 只看延迟会被 cache.db 的 fixed 骗过去。
 
 ```bash
-curl -s -x http://127.0.0.1:7891 'http://ip-api.com/json/?fields=query,country,isp'
+curl -s -x http://127.0.0.1:7891 'http://ip-api.com/json/?fields=query,country,city,isp,org,as,hosting,proxy,mobile'
 ```
+
+**节点名里的国家 ≠ 出口国家**：把 `代理选择` 逐个切到机场标注的 `🇺🇸 USA美国-*`，实测四个全部
+落地**新加坡同一家机房**（`hosting=true`）。所以：
+
+- **别用节点名判断地区**，一律以 `country` 字段为准；判「机房 IP 还是住宅 IP」看 `hosting` / `proxy`，
+  两者为 `true` 时，按地区/风控做准入的目标站大概率仍拒服务。
+- **一次切一个、切完立刻验**，再切下一个。批量切完只看最后一次，会把「没切成功」和「节点名虚标」
+  混成同一个现象，结论必然错。
+- `ipinfo.io` 免费额度会回 429，拿它当探针会静默得到空值，改用 `ip-api.com`。
+- 收尾必须切回 `NCINK出口`，否则全站业务跟着换出口。
 
 ## 每日自动测速
 

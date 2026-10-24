@@ -119,7 +119,7 @@ zero bytes" rather than an error, so it reads like a broken tunnel instead of a 
   long task routinely dies non-fast-forward — and piping the push through a truncating filter turns
   that into an exit 0 you read as success. Pull, push, then `git ls-remote origin main` and compare with
   local `HEAD`; also assert the file is in the remote tree (`git ls-tree --name-only origin/main
-  outbox/ | grep <task_ref>`).
+  outbox/ | grep <task_ref>`). 写进 NAS 共享目录 `/volume2/2-AI/A2A` 的文件**不等于**进了 Gitea 仓（宿主无 git、该目录不是工作树）；要入仓就在克隆里 `git add/commit/push`，再 `ls-remote` 比对。
 - **`to` must be the standard id**, not the display name, when the protocol table defines one —
   Chinese display names are accepted as aliases but ids are what scripts match on.
 - **A missing `[Mentioned:]` head or empty `mentions` on the Feishu side is unrelated to the bus.**
@@ -173,6 +173,23 @@ fi
 
 rsync 两端都加 `--exclude ".smbdelete*"`，否则 macOS/SMB 的临时删除文件会被当新文件提交。
 
+**`git merge --ff-only` 在双向分叉时永久 skip，下游读到的是旧版本 —— 但本地文件看起来一直是新的。**
+两边都在写时（本地领先 N 条、远端领先 M 条），ff-only 每轮都失败，日志只留一句 `merge-skip: not fast-forward`，
+而本地 `group_feed.jsonl` 的 mtime 一直在动。于是「我这边文件是新的」成立，「peer 读到的文件是新的」不成立，
+排障时极易判成对方出口坏了。
+
+对端说「你的文件停在 X 点」时，**不要比本地 mtime，要比它读的那个 ref 上该文件的最后提交时间**：
+
+```bash
+git rev-list --left-right --count HEAD...gitea/main              # 401  20  ← 双向分叉，ff-only 必死
+git log -1 --format=%ci gitea/main -- inbox/group_feed.jsonl     # peer 实际看到的时间点
+git log -1 --format=%ci HEAD       -- inbox/group_feed.jsonl     # 本地真实时间点
+```
+
+两个时间点差多少，就是 peer 落后的量。修法是一次**非 ff 合并**（`git merge gitea/main`，冲突逐条取新）
+或把脚本改成 `git pull --rebase`；只把本地文件重写一遍不解决任何问题。合并前先数远端独有提交，
+别用 `reset --hard origin/main` 把 peer 的成果冲掉。
+
 排障顺序（照抄即可）：`git status` 是否干净 → `ls .git/rebase-merge .git/rebase-apply .git/MERGE_HEAD`
 → 手动 `git pull --rebase` 看真实报错 → `git rev-list --left-right --count origin/main...HEAD`
 → 手动跑一次 `./sync.sh` → `git ls-remote origin main` 与本地 HEAD 比对（这才是「真推上去了」的证据）。
@@ -183,7 +200,9 @@ rsync 两端都加 `--exclude ".smbdelete*"`，否则 macOS/SMB 的临时删除�
 **端到端验收**：任务里放 `nonce`，回执必须带同一个 nonce。只有「NAS 写任务 → peer 领走 →
 回执带 nonce 回到 NAS 共享根」这条完整往返才算打通；单看 `git push` 成功或群里回了消息都不算。
 
-## Windows peer 入列（`C:\A2A`）
+**小豆身份已变更（2026-10-21 起）：旧 Mac 端小豆停用，现在是云端 Windows VPS 全新实例（`100.66.1.9`），与星期五 `.6` 是不同机器不同云。**
+它本机的 A2A 根是 `C:\A2A\a2a-bus`（不是 `C:\A2A` 裸目录——裸目录是工具链/凭据暂存区，仓库要 clone 到 `a2a-bus` 子目录）；
+无系统 git，用便携版 `C:\A2A\git\cmd\git.exe`（2.56.0），worker 已把该路径前置进 PATH。**不要**把 Mac/NAS 的路径假设套到它身上。
 
 Windows 上的 agent 自报「连不上总线」时，先分开三件事：根目录、凭据、网络。
 
@@ -234,7 +253,7 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
 
 | agent | 位置 | 触发 | 脚本 | 投递 |
 |---|---|---|---|---|
-| 小豆 | Windows `10_4_4_16`，组网 `100.66.1.9` | NAS cron `fdaa4c3b5d57` 每 5 分钟经组网 SSH 跑 `C:\A2A\xd_worker.ps1` | `/opt/data/scripts/xd_a2a_worker.sh` | `a2a_dispatch.py --to xiaodou --cmd "..."` |
+| 小豆 | Windows `10_4_4_16`，组网 `100.66.1.9`，**全新云 VPS**（与旧 Mac 端无关，与星期五 `.6` 不同机） | NAS cron `fdaa4c3b5d57` 每 5 分钟经组网 SSH 跑 `C:\A2A\xd_worker.ps1` | `/opt/data/scripts/xd_a2a_worker.sh` | `a2a_dispatch.py --to xiaodou --cmd "..."` |
 | winpc | 公司 Windows `DESKTOP-4PV5HTQ`，组网 `100.66.1.4` | **机器自己**的计划任务 `A2A-Worker-winpc`（`/ru SYSTEM`，每 5 分钟） | `C:\A2A\win_worker.ps1` | `a2a_dispatch.py --to winpc --cmd "..."` |
 
 两种触发模式的选法：**能直连到机器且它常在线 → 用 NAS cron 推**（小豆，可集中改脚本、可观测）；**机器自己就在组网里且你不该把 NAS 变成调度单点 → 用机器本地计划任务**（winpc）。后者不在 NAS 侧留 cron，验收只能靠回执时间戳。
@@ -272,8 +291,10 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
 - **重启反向隧道后先清幽灵监听，再判断通道死活。** 旧 sshd 子进程仍 `LISTEN` 在被转发端口上时，新连接
   TCP 握手成功然后**零字节**——和「代理坏了 / 密钥错了」表现一模一样，白查一轮。固定流程：peer 侧按端口杀监听
   进程 → `stop` → `start` → 回 peer 确认监听 PID 已换。
-- 同步器 `a2a_gh_mirror.py`：Gitea 私有完整总线 → GitHub 公开仓，只搬 `DOC_ALLOW` 白名单文档 + 名册 + 任务索引，IPv4/密钥/token 正则打码，泄漏自检不过就中止。
+- 同步器 `a2a_gh_mirror.py`：Gitea 私有完整总线 → GitHub 公开仓。范围 = `DOC_ALLOW` 文档 + `agents/*.md` + `state/tasks_index.json` + **`EXTRA_DIRS`（`outbox/` `state/` `receipts/`，仅 `.json/.md/.txt`，单文件 ≤256KB）**；逐份 sanitize（IPv4/密钥/token 正则打码），泄漏自检不过就中止。
+- **镜像范围必须覆盖总线的证据目录，否则公开仓对审计毫无价值。** 回执在 `outbox/`、M0 审计副本在 `state/audits/`——只搬文档的白名单会让这些「明明写了却读不到」，而 peer 会当成同步停摆来派单。`results/`（带凭据路径的脚本 + 大 dump）、`processed/`、`inbox/` 正文按「公开仓不放正文」**有意排除**，理由写进 MIRROR.md，否则下一个接单者会当漏配再改一遍。
 - 幂等靠「用 Gitea HEAD 的 `%cI` 当时间戳」，否则每轮都产生空 commit。
+- commit message 带各段计数（`mirror: sync from gitea (17 docs, 8 tasks, 283 receipts/audits)`）——范围是否生效看标题即可判断，不必 diff 全树。
 - **HTTPS 回退**（SSH 不可用时）：`api.github.com` 通、`github.com` 的 git 传输直连会挂，需显式走代理
   `-c http.https://github.com/.proxy=http://192.168.199.2:7891`。代理路线会偶发 TLS `handshake failed`、卡满超时，不要当主路。
 - **每个仓挂自己的部署密钥**，镜像器用 `GIT_SSH_COMMAND` 指私钥：
@@ -284,3 +305,6 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
 - 所有 git 调用要带超时并捕获 `TimeoutExpired`（代理会 TLS handshake failed / 卡 120s），否则 cron 直接 exit 1。
 - **cron 载体用 flock 串行，但 `timeout` 只杀包装层。** `timeout 200 sh wrapper.sh` 超时后 python 子进程可能残留并继续持锁，下一轮 `flock -n 9` 直接静默 exit 0——表现是「跑成功、没输出、内容没变」。排障顺序：`ps -eo pid,args | grep '[a]2a_gh_mirror'` 找残留 → 按 PID `kill -9`；**不要用 `pkill -f <pattern>`**，它会把这条 bash 命令行自身也匹配上，把自己 SIGTERM 掉（exit -15），看着像脚本被杀。
 - **判定 cron 是否真成功看 job 的 `last_status` / `last_error`，不要只看脚本 stdout。** 修好之后、下一轮跑之前，job 里仍挂着上一轮的 error；反过来 stdout 静默也可能是 flock 让路而非成功。
+- **「镜像 HEAD 卡住 >30min」先三分类，别直接重启进程。** 静态 HEAD 有三种成因：①**源仓空窗**——那段时间 Gitea 本来就没有提交，HEAD 不动是正常的；②**提交全在白名单外**——`state/audits`、`outbox` 单独提交，内容变了但镜像看不见，零 diff 自然不产生 commit；③真停摆。判定证据链固定两条：`cron/executions.db` 里该 job 逐轮的 `status`/`error`（有没有跑）+ 源仓 `git log --name-only` 逐笔比对改动路径是否落在镜像范围内（有没有东西可搬）。两条都正常就是 ①②，kill 进程、重装、改 cron 全是白工。
+- **别顺着 peer 的诊断结论修。** 对方的 `diag_*.json` 可能把「白名单过滤」写成「sync job stopped」；照它重启只会浪费一轮。用上一条自己判，并在回执里**点名纠正**那句错误结论——否则错误根因会继续在群里传播，下一个人再按它修一遍。
+- **改完镜像范围，验证要在 GitHub 侧做，不在推送侧。** `PUSHED files=N` 只证明本地算出了东西：`gh api repos/<o>/<r>/git/trees/main?recursive=1 --jq '[.tree[]|select(.type=="blob")]|length'` 对总数，`gh api repos/<o>/<r>/contents/<新路径>` 解 base64 看正文首行，再抽查新增目录的 `.[].name`。最后把「修复回执」本身写进 `outbox/`——它会被下一轮镜像带走，等于用新范围自证。

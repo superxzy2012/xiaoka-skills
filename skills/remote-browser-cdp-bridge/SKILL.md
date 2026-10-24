@@ -151,6 +151,10 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
   command line of the very invocation, so "restart the tunnel" ends the whole call (`exit -15`) and
   leaves the tunnel state unknown. Track the PID (`$!`) or use `-o ControlMaster`/`ControlPath` and
   `ssh -O exit`; or start the replacement on a fresh local port and let the stale one die on its own.
+  Never wrap the tunnel itself in `timeout N`: it exits on schedule and every later call then fails with
+  the same symptoms as a dead browser (`connection refused`, empty `/json/version`) while the browser is
+  perfectly healthy. Run it as a long-lived background process with `ServerAliveInterval` instead, and
+  treat "CDP went down mid-task" as "did my tunnel have a lifetime?" before touching the browser host.
 - **Never steal the user's foreground.** The browser being driven is their daily driver, so every
   action has to be invisible to them: pass `background: true` when creating a target (the parameter
   has to be present at `Target.createTarget` time — activating afterwards does not undo the
@@ -162,6 +166,17 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 - **The bridge depends on the other host staying up.** State this as a constraint, not a bug.
 - **Never type credentials.** Login walls are the user's to clear in their own window; the
   session is then reused over CDP without the secret ever entering the conversation.
+- **A secret the page renders masked cannot be pulled out with the clipboard while you refuse focus.**
+  `navigator.clipboard.readText()` throws `Document is not focused`, and focus emulation does not fix it
+  (it can hang the CDP call). Read the value out of the page's own memory — storage plus React fiber
+  `memoizedProps`/`memoizedState` — and write it straight to a 600 file without echoing it.
+  Recipe: `references/in-page-secret-recovery.md`.
+- **A rented cloud-browser session must be created and consumed inside one script.** Sessions expire
+  between tool calls; reusing a saved `wsEndpoint` returns `404 {"code":"not_found","session not found"}`,
+  which reads like a bad key. Probe plan capability with the minimal payload first — a `402` names the
+  exact unsupported field (`useProxy`, `solveCaptchas`) — and prove the real egress country with an
+  in-page `ipinfo.io/json` **before** judging whether the target site still blocks you.
+  See `references/cloud-browser-sessions.md`.
 
 ## Depth
 - `references/loopback-only-devtools-exposure.md` — relaying a loopback-bound debug port to the
@@ -173,3 +188,8 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 - `references/cookie-export.md` — dual-format export recipe (playwright JSON + Netscape for CLI tools).
 - `references/raw-cdp-and-target-recon.md` — raw CDP without playwright (own-tab discipline, `suppress_origin`, id-matching request loop), probing an unauthenticated vendor panel for real ports/API prefix, and packaging a handoff command.
 - `references/cross-host-admin-grants.md` — sweeping every privilege channel once, fingerprinting vendor panel ports, and shipping a verified one-step SSH pubkey handoff.
+- `references/cloud-browser-sessions.md` — renting a remote session (Hyperbrowser-style) to get an
+  egress in another country: capability 402s, one-script lifetime, exit-IP proof, teardown, and the
+  verification-code handoff that keeps the session alive while the user reads their inbox.
+- `references/in-page-secret-recovery.md` — extracting a masked API key from a React page's fiber tree
+  and storage when the clipboard path requires a focus you are not allowed to take.

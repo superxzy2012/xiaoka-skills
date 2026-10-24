@@ -101,7 +101,7 @@ Rules that make the difference:
 |---|---|
 | `code:0` + `mentions` contains the open_id | ✅ real mention; receiver gets `im.message.receive_v1` |
 | …same, but `mentions[].name` is empty | ✅ still a real mention — `name` resolves blank for **bot** targets. Grade on the **id** only; the probe prints `mention ok ->  ou_…` with a gap and reads like a miss |
-| `code:0` + `mentions: []` | ❌ not a mention — open_id is from another app's view, or target is not in the chat |
+| `code:0` + `mentions: []` | ❌ not a mention — the id did not resolve in this app's view, or the target is not in the chat. Do not argue the point: settle it with the dual-id probe below |
 | `99991679` | user-identity token used on a message API → switch to `tenant_access_token` |
 | `99991672` on member list | missing `im:chat:readonly` — do **not** open a scope for this, use step-2 source 1 |
 | `230027` | missing `im:message.group_msg` (history pull); unrelated to receiving @ — leave it closed |
@@ -161,6 +161,24 @@ token 过期，而是**机器人之间默认不能私聊**（双方「机器人�
 id valid in one chat can silently fail to parse in another. This is the mechanism behind most
 "the @ didn't take" reports — never assume an id is portable, always re-verify.
 
+But do **not** upgrade that into "a peer's self-reported id is unusable". Within one tenant the
+API sometimes **maps** an id from another app's view onto the local one and the @ resolves
+normally (`mentions[]` comes back carrying the local id). Both outcomes exist; only a probe tells
+you which one you are in. So never tell the peer "your id doesn't match my app" on theory alone —
+one probe message costs less than the retraction it saves.
+
+### Probe: which of several candidate ids actually resolves
+
+```bash
+python3 scripts/feishu_dual_id_probe.py --chat oc_xxx --id ou_selfreported --id ou_observed
+```
+
+It sends **one** message @-ing every candidate and prints, per mention, the id the API echoed
+back. Read the ids, not the index (the array order is not guaranteed to follow tag order): an
+echoed id equal to your known local id = that candidate is valid here; a candidate that produced
+no mention entry = it does not resolve in this app. Exit `0` = all resolved, `3` = some did not,
+`1` = API/credential error.
+
 Consequence for handshakes: a peer's authoritative copy of *your* id is the
 `sender=bot:ou_…` field of your message in **its own** inbound log — not the id you pasted as
 chat text, which is only guaranteed to resolve in the app that produced it. So when a
@@ -192,6 +210,12 @@ them, print `msg_type` + body, and pull attachments with
 - **`code:0` is not a delivery receipt.** It means "accepted by the message API". Only
   `mentions` and the peer's visible reply prove the handshake; report the two halves
   separately and never claim the inbound half before the log shows it.
+- **A parsed `mentions` still does not mean the peer saw it.** A Hermes peer bot defaults to
+  `allow_bots: none`, which silently drops every message whose sender is a bot (reject reason
+  `bots_disabled`, no error on either side). Symptom: it answers humans in the same group and
+  never answers you. When that is the shape, re-@ing and swapping ids are wasted turns — send
+  the fix through an out-of-band channel instead (owner relay + a shared bus task file). Config
+  keys and source-verified defaults: `agent-down-doctor`, 第 1a 层.
 - **Don't hardcode a token or app_secret in a probe script** — probes get archived, synced,
   and shared. Read from the env file, keep the file `chmod 600`, and grep the script for
   `t-`/`ghp_` literals before shipping it anywhere.
@@ -300,6 +324,22 @@ in between.
 before escalating to BOSS: here `cloud → NAS:22` is refused through the relay, so the demand
 was not even actionable — and the @ needed no SSH at all.
 
+## 对方不回：先查它的入站准入，不是再 @ 一次
+
+`mentions` 非空只证明「飞书收下了」，不证明「对方看见了」。peer bot 收到却不回，两个最常见原因都在
+**它的**准入层，不在你的 @、不在 id、不在 scope：
+
+| 它的配置 | 现象 |
+|---|---|
+| `allow_bots: none`（默认） | 一切 bot 发来的消息被静默丢弃，人类 @ 它却正常 |
+| 群策略默认 `allowlist` | 白名单没这个发送方 id → `group_policy_rejected` |
+
+判据一句话：**人类 @ 它能回、你 @ 它不回 = 入站过滤**。此时换 id、重发、换措辞全部无效。
+
+处置：把修复指令走带外通道 —— ① 私聊它的 owner 代转（bot→bot DM 被平台封死，见下节）
+② 写进双方共享的总线仓库 `inbox/task_*.json`（它 pull 就有）。群里那条照发只作留痕，
+**不能作为唯一投递**，否则「已下发」是假的。配置项与源码默认值：`agent-down-doctor` 第 1a 层。
+
 ## Honest reporting
 
 Grade the claim by evidence, and say which half you have:
@@ -315,6 +355,8 @@ Grade the claim by evidence, and say which half you have:
 - `scripts/feishu_mention_probe.py` — runnable probe; its exit code is the gate signal.
 - `scripts/feishu_bot_whoami.py` — resolve your own `open_id` + `app_name` via `/bot/v3/info`
   (no extra scope); run this before any bot-to-bot handshake.
+- `scripts/feishu_dual_id_probe.py` — one message, N candidate ids, prints which ones the API
+  actually resolved; use it instead of reasoning about app-scoped ids.
 - `references/roster-resolution.md` — auditing an inbound @ roster: parse the mention head,
   identify yourself, grade each id by evidence, de-duplicate, persist the result.
 - `scripts/feishu_roster_audit.py` — read-only parser over the local gateway logs; prints the

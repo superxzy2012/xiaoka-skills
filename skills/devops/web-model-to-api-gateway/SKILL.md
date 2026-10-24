@@ -109,7 +109,9 @@ BOSS 已经在 Mac/Windows 上登过一次时，**不要让他逐个账号重登
 
 完整配方（只读 sqlite 命令、各厂商 token 落点表、UI 注入代码、失效判据、跨平台换 app.asar 升级内核）见 `references/login-state-transplant.md`；批量列 cookie 用 `scripts/dump_electron_cookies.py`。
 
-两条最容易踩的判断错误：
+三条最容易踩的判断错误：
+
+- **403 不等于 cookie 过期**：上游按**服务端出口 IP 的国家**做准入，令牌搬到另一地区/另一出口的机器上照样 403。判据是先确认令牌结构完好（长度、能否换发），再实测服务端出口国家；两者都对才去怀疑账号。别反复重搬 cookie —— 换出口比换 cookie 便宜得多。这条对 Cookie 系与 OAuth 系都成立（OAuth 侧表现为 `403 unsupported_country_region_territory`）。
 
 - **「cookie 全加密所以搬不了」是错的**：先量 `length(value)`，`>40` 且形如 JWT/refresh token 就是明文可直取。
 - **「验证成功 / 账户在线」≠ 能出话**：加完必须发一条真实 chat 请求，检查 `content` 非空。上游返回 200 但正文空，是网页端签名/指纹校验把请求挡了，令牌本身有效——此时别再重搬，改去查上游协议。

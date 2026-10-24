@@ -110,8 +110,15 @@ git -c user.name=<node> -c user.email=<node>@swarm.local commit -m "..."
 
 ### 4. Store the secret outside any repo working tree
 
-- Canonical ledger: `/opt/data/secrets/a2a-bus-creds.txt`, mode **600**, one TSV line per agent
-  (`login<TAB>password<TAB>url`). Never printed, never pasted into chat, never committed.
+- Canonical ledger: `/opt/data/secrets/a2a-bus-creds.txt`, mode **600**. **Two shapes exist in the
+  wild — read the structure before parsing.** (a) INI blocks: `[<login>]` + `user=` + `pass=`;
+  (b) single line: `login=user:password` (the NAS copy `A2A/secrets/gitea-creds.txt`). A parser that
+  assumes TSV or `login=password` finds nothing, and the failure surfaces as "admin creds not found"
+  or a 401, which reads like a wrong password rather than a parse bug. Any fresh script must accept
+  both shapes and select the block whose header equals the login. Never printed, never pasted into
+  chat, never committed.
+- **Inspect a ledger's shape without echoing it:**
+  `head -3 <file> | sed -E 's/=(.*)$/=<set>/'` shows keys and delimiters with every value masked.
 - Per-node handoff: a `600` env file so the target never handles the password by hand:
 
 ```sh
@@ -200,6 +207,13 @@ deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env
     按旧记录推断会把凭据投到已经没有这个 agent 的机器上，对方只会回「我这里没这个目录」。先读对方宿主上的
     `FEISHU_APP_ID` 确认身份，再谈路径（见 §0.0）。
 
+11. **A bot cannot *read* group history either — monitor via the bus, not the chat.** Sending is blocked by `230013`; reading group messages is blocked by `230027` (missing scope `im:message.group_msg`). So you cannot poll the group to see whether a node responded. Detect liveness from sources you *can* reach: (a) the bus repo — `git log --since='30 hours ago'` filtered by the node's author/commit name, and `ls outbox/` for that node's receipts; (b) NAS-side service logs (mesh `RouteAdd` for the peer, Gitea access logs). Build the nudge/escalation loop on those signals, not on group-scrape. See `scripts/node_link_watch.py`.
+
+12. **`git commit -am` does not stage new files.** A freshly written `inbox/task_*.json` or
+    `outbox/receipt_*.json` stays untracked, so the commit is empty and the push reports nothing to
+    do — which reads as "no write access" and sends you back to re-checking collaborators. Stage with
+    `git add -A`, and confirm `git log -1 --stat` lists the path before treating a push as proof.
+
 ## Credential hygiene (non-negotiable)
 
 - No secret in a command line, a script literal, a group message, or a repo file — not even a
@@ -207,6 +221,12 @@ deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env
 - `600` on every file holding one; `chmod 600` immediately after writing, and re-`stat` to confirm.
 - Read-only sharing of the ledger is fine; echoing any value into chat is not. Report lengths and
   paths, never content.
+- **Prove a secret landed identically on both sides by comparing hashes, not values:**
+  `printf %s "$PW" | sha256sum | cut -c1-8` plus `printf %s "$PW" | wc -c`, printed as `len` + `sha8`
+  only. **Strip the field prefix first** — a line shaped `login=user:password` hashed whole never
+  equals the password's hash, so a naive `cut -d= -f2-` reports a mismatch that looks like a wrong
+  password. Equal `len`+`sha8` on both hosts is the receipt for "the same secret is in both places";
+  a differing hash means one side was written before a rotation — re-issue, do not "try the other one".
 
 ## Depth
 
@@ -215,3 +235,6 @@ deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env
 - Windows node without git / without a shared mount (MinGit portable, SFTP credential delivery,
   GCM override, `-EncodedCommand` execution): see skill `windows-remote-access` — the mechanics
   live there, not here.
+- `scripts/node_link_watch.py` — poll a node's mesh reachability + bus activity on a cadence; nudges
+  (with 4h cooling + 3/day quota) and escalates to QUEEN after a 24h stall. Pair with a cron `every 2h`.
+  Args: `<peerid> <mesh_ip> <bus_author> [--openid <oid>] [--chat <cid>] [--nudge]`.
