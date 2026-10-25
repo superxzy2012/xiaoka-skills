@@ -177,6 +177,37 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
   exact unsupported field (`useProxy`, `solveCaptchas`) — and prove the real egress country with an
   in-page `ipinfo.io/json` **before** judging whether the target site still blocks you.
   See `references/cloud-browser-sessions.md`.
+- **Pin the endpoint — a shared helper's default may resolve to a different browser.** A helper that
+  probes candidate ports can land on another Chromium on the same host, and then every answer
+  ("what is my IP", "which tabs are open") describes the wrong machine: a country check reads `CN`
+  while the user's browser really sits on a US node. Fingerprint it by comparing the `Browser` string
+  from `/json/version` on the port you targeted against `navigator.userAgent` read in the page — a
+  `Chrome/155` port serving a `Chrome/124` page is the wrong browser. Pass the endpoint explicitly.
+- **`with <helper>():` closes the tab it created.** Bundled clients commonly call `Target.closeTarget`
+  inside `close()`, which the context manager invokes on exit, so a `with` block that only opens and
+  navigates leaves nothing behind for the next call. Run multi-call flows outside the context manager
+  (or the whole flow inside it), and lean on the profile's cookie jar — a closed tab costs the tab,
+  not the login.
+- **A target created through `browser.new_browser_cdp_session().send("Target.createTarget")` never shows up in `ctx.pages`.** Playwright lists only the pages it auto-attached to, so the follow-up `for page in ctx.pages` loop finds nothing and the flow dies with "no page" while the tab is visibly open. Create the tab through the helper (`new_tab()` → targetId → `Target.attachToTarget`) or open it with a real URL and locate it by `page.url`, then drive that page with `connect_over_cdp`.
+- **Multi-step form input: use playwright, not the raw request loop.** One long-lived playwright
+  connection survives a relayed port; a hand-rolled id-matched loop meets `WebSocketTimeoutException`
+  mid-sequence on the same link and you lose the half-filled form. Keep raw CDP for single probes and
+  screenshots.
+- **A React-controlled input ignores `el.value = …`.** Assigning the value plus dispatching
+  `input`/`change` updates the DOM but not React state, so submit posts an empty field and the page
+  simply does not advance — no error anywhere, which reads as "the button is dead". Use `page.fill()` /
+  `page.type()`, or CDP `Input.insertText` after a real click on the field.
+- **`role="presentation"` overlays swallow clicks.** Playwright reports `<div role="presentation">
+  intercepts pointer events` and retries to timeout. `click(force=True)` or an in-page `.click()` gets
+  through — read that message as "use force", not "element missing".
+- **A localized UI makes English selectors match zero elements.** When the user's browser locale is
+  Chinese, the button really is 「继续」/「设置」and `get_by_role(name="Continue")` returns count 0, which
+  looks exactly like a missing control. Always try both languages (or a structural/positional selector)
+  before concluding the page lacks the element.
+- **Screenshot chain when a heavy SPA fights you.** `page.screenshot(clip=…)` can hang in "waiting for
+  font"; take the full-page shot and crop with PIL instead. Raw `Page.captureScreenshot` over a relayed
+  port frequently times out on the **first** attempt and succeeds on retry — wrap it in 3 attempts
+  before reporting failure, and sanity-check file size (a blank page still yields a valid image).
 
 ## Depth
 - `references/loopback-only-devtools-exposure.md` — relaying a loopback-bound debug port to the
