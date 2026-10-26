@@ -35,7 +35,10 @@ BOSS 问这个时，**不许靠 config 注释、`providers.*.model` 声明，或
 若那一跳落在**远端聚合网关**（`baseUrl` 指向 `wbmodel.iepose.cn` 这类），要再下一层：**聚合网关自己的 `X-Aggregator-Model` 头**才是真模型名（实测 `auto` → `global:deepseek-v4.1-flash`）。
 
 ### 0.2 判定三步（照做，别猜）
-1. **取 key**：`read_file` 看 config.yaml 的 `api_key` 是打码的，脚本里用 `open()` 读原文（`re.search(r'name: <provider的name>.*?api_key:\s*(\S+)', t, re.S)`）。
+1. **取 key 只认 `.env`，不认 `config.yaml`**：`providers.*.api_key` 里常见的是**打码占位串**（形如
+   `sk-432...73da`），拿它直连会回 `401 AUTH_002 Invalid API key`，读起来像网关挂了。权威值是
+   `/opt/data/.env` 的 `CUSTOM:192-168-199-2-20128_API_KEY`（取到后先看长度：真 key 约 35 位，
+   带 `...` 的必是占位串）。判据：`AUTH_002` = key 错，不是通道错——换模型、换 base 都不会好。
 1b. **`.env` 里带冒号的键 source 不了**：`set -a; . ./.env` 会把 `CUSTOM:192-...` 当命令执行而失败，改用 Python 逐行 `split("=", 1)` 取值。
 
 2. **打一发，只读头**（body 的 `model` 字段没用）：
@@ -158,6 +161,43 @@ fallback_providers:
 - `patch`/`write_file` 改 `/opt/data/config.yaml` 会被安全策略拒（`Agent cannot modify security-sensitive configuration`）。
 - `hermes config set` 写 JSON 列表/嵌套结构会把文件改坏（丢注释、缩进错乱），事后要靠 `hermes config check` 才看得出。
 - 走 python 文本替换：读全文 → `assert s.count(old)==1` → 写回；改前备份，已知良好版本在 `/opt/data/backups/config/config.yaml.good.*`。改完跑 `hermes config check`（无 error/invalid 才算过）。
+
+### 6.5 报错级联（Rate limited → 备用全 unreachable）：先分清「主 429」与「备不可达」
+
+症状指纹：`Rate limited` 与 `Provider unreachable` 交替刷，fallback 从主模型一路掉到末档，`5 automatic recovery cycles` 后放弃。
+这不是模型名错（那是 400），也常常不是降级链没配 —— 是**两个故障叠在一起**，只修一个仍会报错。
+
+诊断必须在**出故障的那台机器**上做，不能在网关侧做：
+
+```bash
+# 1) 主通道：直连 provider，读 429 的原文（别只看「Rate limited」四个字）
+curl -s -m20 <主provider base>/chat/completions -H "Authorization: Bearer $K" \
+  -H 'Content-Type: application/json' -d '{"model":"<主模型>","messages":[{"role":"user","content":"hi"}],"max_tokens":8}'
+# 2) 备用通道：备用都挂在同一个网关时，先验这台机器到网关通不通
+curl -s -m8 -o /dev/null -w '%{http_code} %{time_total}s\n' http://<网关>/v1/models
+```
+
+| 结果 | 判读 | 处置 |
+|---|---|---|
+| `429 AccountQuotaExceeded`（火山方舟 Coding Plan） | **5 小时窗口配额用光**，响应体给重置时间 | 换 key / 换 base_url 都没用；等窗口重置或换主通道 |
+| 备用 `000` / 满 8 秒超时 | 那台机器到网关链路断（组网问题） | 先修链路；此时改 fallback 顺序毫无意义，所有备用会一起死 |
+| 网关侧自己 200 而故障机 000 | 远端可达性问题 | **网关侧 200 不能证明远端可达**，一律从故障机发起验证 |
+| 网关回 `401 AUTH_002 Invalid API key` | 用了 `config.yaml` 里的打码占位 key | 改从 `.env` 的 `CUSTOM:..._API_KEY` 取真 key；网关本身是好的 |
+
+**备用全 `000` 时先别怀疑网关。** 最常见的具体原因是那台机器自己的防火墙把组网回包丢了：tailscale 的
+`ts-input` 链有 `-s 100.64.0.0/10 ! -i tailscale0 -j DROP`，而节点小宝的 `100.66.1.0/24` 正落在该段里，
+于是请求出得去、应答回不来。判据：在那台上 `sudo tcpdump -ni NodeBabyLink` 同时另开一个 curl ——
+看到 **SYN 出去、SYN-ACK 回来、本机又重传 SYN** 就是回包被 INPUT 丢弃，与模型、fallback 顺序、
+客户端版本全部无关。修法与持久化见技能 `nodebabylink-mesh-troubleshoot` 的「入站正常但出站全灭」。
+
+修复顺序：① 先修链路（备用能通）；② 再把主模型切到能用的通道、原主通道降为兜底 ——
+主通道天天 429 会让每次请求都先吃一次失败再降级，既慢又把日志刷脏。
+
+切换照 §五 的三件套（`provider`/`default`/`base_url` 同改）+ 备份 + 重启 gateway。
+**生效判据**：gateway.log 里出现 `Model context warmed: <新模型> -> <ctx> tokens (config)` 即为新配置已加载，
+比翻 OmniRoute `call_logs` 快；journalctl 看不到这行是因为它写进 gateway 自己的日志文件。
+
+端到端验证：在群里 @ 那个 agent 让它只回一句短话，比 curl 更能证明「网关 → 模型 → 回复」整链通。
 
 ## 八、按任务选免费模型（2026-10-20 全量实测）
 
@@ -372,4 +412,4 @@ python3 /opt/nas/volume2/2-AI/skills/agent-model-routing-setup/scripts/probe_mod
 - 禁 reboot：跑在 NAS 上，重启 = 自杀。
 - 改完**顺手检查注释与声明是否跟得上**：config 里 `model.default`、注释、`providers.*.model` 三处说法不一致时**不会报错**，只会让 `context_length` 等按错的模型算。发现不一致就报给 BOSS 并给出统一选项，别只改一半。
 - **云端 gateway（`systemd --user hermes-gateway`）切模型要改四处**：`model.default`、`model_display_name`、provider 块里的 `name`（面板和日志显示用）、restart。改前先 `cp config.yaml config.yaml.bak.<用途>`，回滚靠它。
-- **验证生效别指望 journalctl**：它通常不会打出 `active model` 这种明确行。可靠做法是比对 **OmniRoute 的 `call_logs/<日期>/*.json`** 里的 `"model"` 值与 gateway 重启时刻——重启后的第一条就是新选的模型，才算真生效。容器内没 `python3` 时用 `grep -o '"model":"[^"]*"'` 纯 shell 解析。
+- **验证生效别指望 journalctl**：它通常不会打出 `active model` 这种明确行。可靠做法是比对 **OmniRoute 的 `call_logs/<日期>/*.json`** 里的 `"model"` 值与 gateway 重启时刻——重启后的第一条就是新选的模型，才算真生效。容器内没 `python3` 时用 `grep -o '"model":"[^"]*"'` 纯 shell 解析。更快的判据是 gateway 自己的日志文件里 `Model context warmed: <model> -> <ctx> tokens (config)` 这行（重启后立刻出现）。

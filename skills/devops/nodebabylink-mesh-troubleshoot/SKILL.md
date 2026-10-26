@@ -1,6 +1,6 @@
 ---
 name: nodebabylink-mesh-troubleshoot
-description: Use when 节点小宝/绿联组网不通。先用 RouteAdd 权威表定位对端 IP，再用 16880 探针判定数据面；单节点掉线用三角定位判定，再用跳板隧道绕过。
+description: Use when 节点小宝/绿联组网不通，或要判断客户端与服务端该不该升级/降级。先用 RouteAdd 权威表定位对端 IP，再用 16880 探针判定数据面；单节点掉线用三角定位判定，再用跳板隧道绕过。
 ---
 
 # 节点小宝（绿联远程组网）排障
@@ -155,6 +155,15 @@ python3 <skill>/scripts/probe_ports.py 192.168.199.2:22 100.66.1.5:22 100.66.1.6
 | `ConnectionRefusedError` | 主机活着，但该端口没监听 | 去那台机器上查服务 |
 
 - **超时与拒绝含义完全不同**，汇报时不能都写成「不通」。
+- **shell 侧看 `rc=124`：这是「丢包」，不是「拒绝」。** 用 `timeout 5 bash -c 'exec 3<>/dev/tcp/<h>/<p>'` 探测时，
+  `refused` 会**秒回**（内核 RST，耗时几毫秒），只有**无任何回应**才会把 `timeout` 耗满到点，退出码是 **124**。
+  所以「rc=124 + 耗时约等于你给的超时值」= SYN 出去没人应 = 上游丢包/安全组未放行；
+  「rc=1 且立刻返回」= 主机活着但端口没监听。两者不能用同一句话汇报。
+  （`/dev/tcp` 只用来判**连不连得上**；要读 banner 仍然用 `scripts/probe_ports.py`，`/dev/tcp` 读 banner 会假阴性。）
+- **任何「全通」/「全不通」先做反向对照再采信。** 探一个确定不存在的地址（如 `100.66.1.99`、`100.66.1.250`）：
+  它也必须 `closed`；如果它也「通」，说明有代理/桩在接管，整批结果作废。
+  同理可用 banner 交叉验真：真 SSH 会回 `SSH-2.0-OpenSSH_…`，对照地址应无任何字节。
+  与「ping RTT < 0.5ms = 本机代答」是同一族陷阱，一个在 ICMP、一个在 TCP 层。
 - 公网 IP 的 22 超时、组网 IP 的 22 通，是常态（安全组只放业务端口），不是故障。
 - **绑 `127.0.0.1` 的调试口（Chrome 9222/9223 之类）从别的机器直探必然失败**：先在那台机器上
   `netstat -ano | Select-String ':9223'` 确认有没有监听，再用 SSH `-L <本地>:127.0.0.1:9223` 隧道探本地端口。
@@ -219,7 +228,9 @@ socket.create_connection(("100.66.1.9", 22), 5).recv(64)
 # b'SSH-2.0-OpenSSH_for_Windows_9.5\r\n'  => 通
 ```
 
-**方向是单向的**：网关 → 客户端通；客户端 → 网关（`100.66.1.7:22/3000`）通常不通，日志 `[team] OnDeviceWhitelist: 0 entries, 0 pids`。所以需要客户端主动连网关的场景（git push、拉任务）仍要 SSH 反向隧道，别指望组网。
+**方向本应双向**：网关 → 客户端通，客户端 → 网关（`100.66.1.7:3000`/`:20128`）也通 —— 实测 Windows super 与 Windows Server 小豆打 `100.66.1.7:20128` 都拿到 `401`。某台客户端打不通网关，是**那台自己的故障**（最常见是 tailscale 的 CGNAT DROP，见下文「入站正常但出站全灭」），不是「组网天生单向」。用反向隧道把它盖过去，等于把可修的故障藏起来。
+
+日志里 `[team] OnDeviceWhitelist: 0 entries, 0 pids` 是「团队白名单未启用」= 不限制，不是拦你的证据。
 
 ## 组网不是全连通：一个节点掉线时，别把结论推广到全网
 
@@ -273,6 +284,123 @@ GUI 主程序是 `desktop\NodeBabyLinkDesk.exe`（Flutter，session 0 起不来�
 ## 升级后必须重新扫码绑定
 
 4.3.5 → 4.5.2 peerid 会变（`...26377OW` → `...2636BOW`），改 ini 或还原 `nblink.dat` **都无效**，服务端报 `rtn=10208 设备未绑定`。唯一解法：设备页 `jdxb_server_pc_v3/?client=windows&hostname=<h>&pid=<新peerid>` 重新扫码，绑定后服务端会**分配新 IP**（旧 100.66.1.8 → 新 100.66.1.9）。
+
+## 版本与升级：客户端别手动动，服务端是唯一拍板点
+
+**版本不统一本身不是故障。** 实测服务端 4.3.5 + 客户端 4.5.3 可以正常传数据（NAS 日志 `mapping succ` 后
+`sent 5947 recv 4305`）。所以「版本错配 → 数据面必死」不成立，别把版本对齐当成首选修复。
+
+**升级策略**：
+
+- 客户端（Windows / Linux / Mac）**不要手动升降**：`ownbsvman` 每次启动都先做版本同步再拉起服务，
+  换二进制会被覆盖，白费功夫；客户端落后一两个小版本无所谓。
+- **NAS 服务端容器是唯一需要人拍板的点**：它是所有人的汇聚点，重启即全员掉线，必须挑窗口。
+- 真要版本对齐时**服务端先升、客户端随后自动跟上**，不要反过来把客户端升到远新于服务端。
+- 只有「所有客户端都连不上 + 各自重启客户端也无效」才轮到升服务端镜像。
+
+查现状版本（一次问全，别按名字猜）：
+
+```bash
+# 服务端（NAS）
+sudo -n docker inspect owjdxb --format 'image={{.Config.Image}}'
+sudo -n docker exec owjdxb sh -c "grep -a glversion <SVC> | tail -2"      # 报 version 4.x.x
+# Linux 客户端
+cat ~/owjdxb/ownbsv/.version; sudo -n md5sum ~/owjdxb/ownbsv/NodeBabyLinkService
+# Windows 客户端：读 exe 的 VersionInfo（引号处理见「远端 Windows 上跑长命令」）
+```
+
+### 想钉住旧版本：改二进制和改 /etc/hosts 都无效
+
+`ownbsvman` 在**每次启动**时先做版本同步、再拉起服务，日志里 `ownbsv start, .ver=<版本>` 是**同步之后**才打的
+—— 看到这行说明换版已经发生，不代表「当前还是旧版」。把旧版二进制覆盖进 `ownbsv/` 后只要重启一次
+（哪怕只是 `serv.sh start`），它就会把新版下回来覆盖。判据用 `md5sum` 与备份比对，别只看 `.version` 或进程启动时间。
+
+`/etc/hosts` 屏蔽 `pcdntest2.ionewu.com` **拦不住**（加完仍被升级，它走别的通道/IP），别拿它当版本钉，
+白留一条无效改动。要真钉住只能停掉 ownbsvman 的版本同步，代价是放弃官方修复 —— 属于要 BOSS 拍板的事。
+
+### 控制面全绿、数据面全死：先重启客户端，再谈版本
+
+症状：RouteAdd succ、接口/路由/MTU(1430) 全对、`addRoute ... succ (sys 100.66.1.0/24)` 照打，
+但对端 TCP 连任何端口（3000/3456/22）**全部 SYN 超时**；服务端日志里**看不到这些探测的 TCP mapping**；
+对端刷 `pxymap/glcrouter.go:20 MapingRoute err: NotFound . addr <服务端LAN IP>`。
+
+判定与修复顺序：
+
+0. 先在故障端 `tcpdump -ni NodeBabyLink` 抓一次（同时另开一个 curl 打对端）：**SYN 出、SYN-ACK 回、本机又重传 SYN** = 回包被本机防火墙丢了
+   （tailscale 的 `100.64.0.0/10` DROP 规则），此时重启客户端、换版本都无效，直接 `iptables -S ts-input`。
+1. 在故障端发探测，同时在服务端 `grep <peerid> NodeBabyLinkService.log | tail`：**零 mapping 记录 = 包没穿隧道**。
+2. `mapping succ` 后紧跟 `sent 0 recv 0 err timeout` = **客户端会话死了** → **重启客户端**
+   （`serv.sh stop` 再 `start`，或重启 NodeBabyLinkService 服务），这是最常见也最便宜的一步。
+3. 重启无效才做版本对齐，且**优先动故障端那一台**（影响单机）；升服务端会瞬断全员，须批窗口。
+4. 别被 `addRoute succ` 骗：**控制面协议与数据面协议分离**，route 协商成功 ≠ 隧道能传数据。
+5. 组网死时**公网通道照常可用**（GitHub 主通道），别因为组网不通就以为整台机器失联。
+
+### 服务端（NAS 容器）「升级到最新」通常是伪需求：先查官方镜像内部版本
+
+NAS 上跑的是 UGOS 版镜像 `ionewu/nblink:v4.2.3-821`，**镜像 tag 与内部 glversion 不是一回事**
+（tag v4.2.3，内部 `ownbsv/.version` 与日志 `glversion` 都是 4.3.5）。判断「有没有新版」只有一条硬证据：
+
+```bash
+# 1) 现网内部版本 + 二进制指纹
+sudo -n docker exec owjdxb sh -c "cat /owjdxb/ownbsv/.version; md5sum /owjdxb/ownbsv/NodeBabyLinkService; ls -l /owjdxb/ownbsv/NodeBabyLinkService"
+# 2) 官方镜像同样查一遍（Hub 直连被墙，走 1ms 镜像）
+sudo -n docker pull docker.1ms.run/ionewu/owjdxb:latest
+sudo -n docker run --rm --entrypoint sh docker.1ms.run/ionewu/owjdxb:latest \
+  -c "cat /owjdxb/ownbsv/.version; md5sum /owjdxb/ownbsv/NodeBabyLinkService; ls -l /owjdxb/ownbsv/NodeBabyLinkService"
+```
+
+2026-10-25 实测：官方 `ionewu/owjdxb:latest` 内部也是 **4.3.5**，二进制构建于 08-25；
+NAS 现网二进制构建于 **10-01**（更新），版本同为 4.3.5。**即服务端已是最新，无可升版本**，
+客户端 4.5.2/4.5.3 属于客户端线，服务端发布滞后于客户端属正常，实测兼容。
+
+要点：① 官方仓库名是 `ionewu/owjdxb`（不是 `nblink`），可用 tag 见
+`curl -s https://docker.1ms.run/v2/ionewu/owjdxb/tags/list`；② Hub 直连 `registry-1.docker.io` 超时，
+`daemon.json` 里的 registry-mirrors 对 token 环节无效，改用 `docker.1ms.run/<repo>` 前缀可拉；
+③ 重启容器**不会**让服务端自升级（ownbsvman 在容器里不做版本同步，与客户端行为不同），别指望靠 restart 升版；
+④ 升级/重启前先 `cp -a /owjdxb/ownbsv` 与 `/owjdxb/bin` 到 `/data/store/OWData/owjdxb/` 持久层备份，
+重启约 40 秒，全员瞬时掉线；⑤ 宿主机 `DY` 只对 `/usr/bin/docker` 免密，其余 sudo 要密码；
+⑥ 改 `/etc/hosts` 这类系统文件会触发审批：**审批超时 = 未同意**，不要改写命令重试，
+先把「加了什么、没生效、怎么撤」原样报给 BOSS 并请他重批，再执行撤销——留一条无效改动在系统里
+比没做更糟（后续排查会把它当已生效的配置）。
+
+### 入站正常但出站全灭 = tailscale 的 CGNAT DROP 规则（2026-10-25 实测，Linux 客户端）
+
+**症状**：该节点能被别人连进来（SSH、16880 探针都正常），但它自己访问任何 `100.66.1.x` 全部超时；
+`curl http://100.66.1.7:20128` 卡满 8 秒返回 000；节点小宝日志里刷
+`pxymap/glcrouter.go:20 MapingRoute err: NotFound . addr 192.168.199.2`。
+
+**定位手法**（关键，别靠猜版本）：
+```bash
+sudo tcpdump -ni NodeBabyLink -c 12      # 同时另开一个 curl 打对端
+```
+会看到 `SYN 出 → SYN-ACK 回 → 本机又重传 SYN`，说明**回包在内核 INPUT 阶段被丢了**，
+不是隧道没通、也不是版本不兼容。再查防火墙：
+```bash
+sudo iptables -S ts-input | head
+# -A ts-input -s 100.64.0.0/10 ! -i tailscale0 -j DROP   ← 就是它
+```
+节点小宝的 `100.66.1.0/24` 落在 tailscale 的 CGNAT 段 `100.64.0.0/10` 里，回包从
+`NodeBabyLink` 进来（非 `tailscale0`）即被 DROP。
+
+**修复**（一行，立即生效）：
+```bash
+sudo iptables -I ts-input 1 -i NodeBabyLink -j RETURN
+```
+验证：`curl -m8 http://100.66.1.7:20128/v1/models` → 401（0.5s 内），Gitea 3000 → 200。
+
+**持久化**：`ts-input` 是 tailscaled 自己建的链，开机/重启 tailscaled 会重建并丢我们的规则。
+用两个 unit（已装于 100.66.1.6，enabled + active）：
+- `nblink-fw.service`：oneshot，`After=tailscaled.service`，`ExecStart=/bin/sh -c 'iptables -C ts-input -i NodeBabyLink -j RETURN 2>/dev/null || iptables -I ts-input 1 -i NodeBabyLink -j RETURN'`
+- `nblink-fw-check.timer/.service`：`OnBootSec=2min` + `OnUnitActiveSec=15min` 周期性补规则（tailscaled 自动更新会重启并重建自己的链，光靠开机那一次不够）
+
+自愈验收法：`iptables -D ts-input -i NodeBabyLink -j RETURN` 故意删掉 → `systemctl start nblink-fw-check.service` → 规则应回来且 `curl -m8 http://100.66.1.7:20128/v1/models` 回到 401（50ms 级）。
+改 `/etc/systemd/system` 属系统配置，动手前先跟 BOSS 报备。
+
+**最容易误判的一点**：入站是客户端把对端请求映射到 `127.0.0.1:port` 完成的，**根本不经过 tun**，
+所以「我能 SSH 进去」完全不能证明该节点数据面健康。判断必须双向：从该节点**主动**打对端。
+
+**排障顺序修正**（推翻「先降版本」的老思路）：① 先双向连通性（主动打对端）；② tcpdump 看是没发包还是回包被丢；
+③ 查 tailscale/防火墙 CGNAT 规则；④ 最后才谈客户端版本 —— 本例 4.3.5 与 4.5.3 表现完全一致，版本无关。
 
 ## 新节点接入（给 peer 开 SSH 通道）
 
@@ -360,6 +488,18 @@ Stop-Process -Id <pid> -Force           # 只杀那个监听进程，别动 sshd
 进程又在等 stdin，于是「无输出、无报错、超时」。可靠形态是 `.bat`（ASCII + CRLF，重定向补 `< NUL`）
 由 `.ps1`（UTF-8 BOM）`Start-Process -WindowStyle Hidden` 起，`Start-Sleep` 后 `Get-Content <log> -Tail 8`。
 完整模板见 `a2a-file-bus` → `references/github-mirror-transport.md`。
+
+**引号地狱用 `-EncodedCommand`**：经 `pc.sh` / ssh 传 `powershell -Command "..."` 时，嵌套引号和
+`Program Files (x86)` 里的括号会被本地 shell 与 PowerShell 各吃一层（典型报错 `CommandNotFoundException: x86`）。
+本地生成 UTF-16LE base64 再传，一次搞定：
+
+```bash
+B64=$(python3 -c "import base64;c='Get-Item \"C:\\\\Program Files (x86)\\\\nblink\\\\nblink.exe\" | % { \$_.VersionInfo.FileVersion }';print(base64.b64encode(c.encode('utf-16-le')).decode())")
+pc.sh "powershell -NoProfile -EncodedCommand $B64"
+```
+
+读 Windows 客户端版本就走这条路（`Get-Item <exe> | % { $_.VersionInfo.FileVersion }`），
+别用 `dir` 猜，也别信 `Get-NetIPAddress` 之类与组网无关的自检。
 
 **Windows 客户端的控制台端口不是 9118。** `9118` 是绿联 NAS（UGOS）内置版专用；Windows 版 `NodeBabyLinkService` 实测监听：
 `127.0.0.1:16880`（管理口，任何路径 404）、`127.66.36.18:2443`（HTTPS）、`127.66.36.18:2080`、`127.0.0.1:2080`。

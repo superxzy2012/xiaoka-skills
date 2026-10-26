@@ -63,7 +63,12 @@ such links; or a task needs durable notes built from video content.
    **OCR is a candidate source, not an authority** — that misread org name returned
    `Not Found` when queried directly and only resolved via a repository search that found
    the correct spelling. Confirm any identifier that will be cited with a live lookup.
-   Fix the transcript's wording in the note and mark the corrections inline.
+   **Write the corrections as a 校订表, not silent edits** — `ASR 原文 | 校订 | 依据 | 置信度`.
+   Only rewrite what the frames or context can confirm; a homophone you merely suspect stays in
+   the transcript unchanged and appears in the table as 存疑（不改，仅提示）. Silently "fixing"
+   an uncertain word invents content that no longer matches the audio.
+   **平台贴片广告音轨不是内容**：转写尾部常挂一句平台/剧场广告（「优优独播剧场——YoYo Television
+   Series Exclusive」这类），在笔记里点明来源并排除，别把它提炼成要点。
 
 ## When the downloader is walled: borrow the browser's own signature (douyin)
 
@@ -182,8 +187,30 @@ Same-org same-language siblings are the strongest decoys: `firecrawl/pdf-inspect
 Rust, same org) matched on every heuristic but handles PDF only, while the correct answer was
 `firecrawl/anydoc` (★22,472). **Match the README description text, not star count or naming.**
 
+**Repo-shaped strings on screen are not a promoted project.** A monitoring dashboard listing the
+author's own repos (`feishu-role-bot-kit`, `claude-standard-dev…`) is a screenshot of *their*
+infrastructure, not a tool the video is handing out. Decide by the CTA: 「这一套我也能给你的公司搭
+起来」= selling a build service → record it in the note and install nothing; only a repo link,
+`npx …`, or `git clone` on screen / in the caption starts the install path. Misreading this burns
+a session hunting a repo that was never offered.
+
 ## Pitfalls
 
+- **After the rewrite, rename the note to a short clean name and delete the auto one.** `ingest.py`
+  names the file from the full platform title, so it lands as a ~90-char string with commas and
+  spaces that no one will ever wikilink. Push the rewritten note as `YYYYMMDD-<主题>-<关键点>.md`,
+  then delete the auto file through the same root container
+  (`rm -f '/v/08-抖音视频学习/<old>' && echo DEL_OK`) — the vault is not writable from the shell,
+  so `mv`/`rm` there fail with `Permission denied`. Re-read from the host side afterwards
+  (`ls -la` + `md5sum`) and match it against the local copy. The swap is one small script, no
+  manual container calls: write the rewrite to scratch, `from ingest import push_to_vault`, push
+  `[(scratch_path, '08-抖音视频学习/<new>.md')]` (it does tar→NAS /tmp→root container→chown and
+  prints PUSH_OK), then delete the old file via the same container path and compare host-side md5.
+  Never re-run ingest.py to "re-push" — it regenerates the note from the transcript (next pitfall).
+- **A self-reported aggregate gets checked by re-adding the on-screen breakdown.** 「三天 741 件事」
+  was verifiable only because the closing frame showed `206 / 250 / 285`; when no breakdown exists,
+  write the number as 作者自述、无外部可验证来源 and say what unit is missing — 「件」can mean a task,
+  an API call, or one artifact, and the three differ by orders of magnitude.
 - **Separate "the note is written" from "the metadata is right," and say which you have.**
   The note landing on disk is the deliverable; a half-resolved `author` field or an unverified
   number is not. When a follow-up repair is blocked, report the note as done *and* the repair as

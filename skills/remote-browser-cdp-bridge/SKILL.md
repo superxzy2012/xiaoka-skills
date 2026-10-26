@@ -137,7 +137,18 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 - **Key material handed to a user must come from the private key.** A `known_hosts` line is indistinguishable from a public key and pastes cleanly while authorizing nothing.
 - **`'Page.captureScreenshot' wasn't found` means wrong session, not a missing method.** Page/DOM
   domain commands have to ride the tab's attached session; `new_tab()` returns a **targetId**, and
-  passing that as a session id fails with the same "method not found" wording. In the bundled
+  passing that as a session id fails with the same "method not found" wording.
+  The **opposite** mistake is just as silent: after `Target.attachToTarget` (`flatten:true`) you must put
+  the returned `sessionId` into **every** subsequent message body
+  (`{"id":n,"method":…,"params":…,"sessionId":sid}`). Omit it and the call runs at browser level, so
+  `Runtime.evaluate` returns no value and `document.querySelector(...)` reads `None` — which looks like
+  "the page has no such element" while the real cause is "the message went to the wrong session".
+  Self-check: after `Input.insertText`, read the field's `value.length` back — it must equal the number
+  of characters you inserted; `None` means the sessionId is missing, not that the selector is wrong.
+  Two neighbours in the same family: a WS handshake answering `403 Rejected an incoming WebSocket
+  connection from the http://127.0.0.1:<port> origin` needs `suppress_origin=True` (or connect to the
+  browser-level `/json/version` WS and attach from there), and `json.load(urlopen(...).read())` raises
+  `AttributeError: 'bytes' object has no attribute 'read'` — decode first (`json.loads(...read().decode())`). In the bundled
   client the live session is `c._sid`: `c.call("Page.captureScreenshot", {"format": "png"}, c._sid)`.
   The reply is wrapped — the image is `r["result"]["data"]` (base64 PNG), not `r["data"]`; keying on
   the unwrapped shape reads as "capture failed" while the call actually succeeded. `Target.createTarget`

@@ -15,7 +15,7 @@ Octop = 「很多专家 + 一个控制台」的 agent 平台。在蜂群里当**
 | 容器 | `octop`（`sudo -n docker` 走 SSH `DY@192.168.199.2`） |
 | 数据 | 容器内 `/data/.octop`；DB `/volume2/2-AI/octop/octop.db`（SQLite） |
 | 凭据 | `/opt/data/secrets/octop_admin.txt`（600，`admin` / 邮箱 / 密码） |
-| 公共库 | `/opt/data/cache/scratch/oct_lib.py`（login / call / ws_chat） |
+| 公共库 | `/opt/data/lib/oct_lib.py`（login / call / ws_chat）。🔴 **绝不能放 `/opt/data/cache/scratch/`**——该目录 24h 自动清理，库被删后 cron 连挂数百次（2026-10-25 实测 474 连错 ModuleNotFoundError）。worker 与 CLI 的 `sys.path.insert` 都指向 `/opt/data/lib`。WS 正文只取 `type==token` 的 content 增量、跳过 reasoning/控制帧，结束帧 `type==done`。 |
 | CLI | `/opt/data/bin/octop`（ls / health / kb / ask / team） |
 
 ## 1. 一条命令派活

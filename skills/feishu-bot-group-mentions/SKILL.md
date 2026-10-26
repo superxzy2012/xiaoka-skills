@@ -185,6 +185,12 @@ chat text, which is only guaranteed to resolve in the app that produced it. So w
 handshake is done by posting ids, say which half you verified (yours parsed on the way out),
 and let the peer confirm it resolves on its side via its own `mentions[]`.
 
+### 一个脚本只服务一种 `receive_id_type`，不要用 `--dm` 开关扩一个群发器
+
+群发用 `receive_id_type=chat_id`（`oc_…`），私聊用 `receive_id_type=open_id`（`ou_…`），**这个 query 参数写死在 URL 里**，不是 body 字段。把两者合并进同一个脚本时典型翻车：`--send` 模式固定 `chat_id`，传入 `ou_…` 会报 230013/参数不合法；而“空 open_id 分支”往往少传一个参数，直接在 argparse 报错，看起来像脚本坏了。
+
+做法：群发一个脚本（`SEND_URL` 带 `chat_id`）、私聊一个脚本（带 `open_id`），或把 URL 改成 `f"…?receive_id_type={kind}"` 并按 id 前缀（`oc_`/`ou_`）选 kind。改完两种各真发一条验证——`code=0` 只证明这次参数对了。
+
 ## Reading a specific message back (no extra scope)
 
 `GET /open-apis/im/v1/messages/<message_id>` works with the app's ordinary message scope **for
@@ -201,6 +207,19 @@ them, print `msg_type` + body, and pull attachments with
   `im:message.group_msg` (`230027`). The ids you already received are enough.
 - A file message only lands in the store if the upload **@-mentioned you**; a bare upload into
   the group-files area never reaches the bot.
+
+## 长正文 / 含反引号的正文：走文件，不要内联进命令行
+
+`feishu-at <chat> <open_id> "<正文>"` 里正文是**经 shell 传进来的字符串**。一旦出现反引号、`$(...)`、
+未定义变量，就会被外层 shell 做命令替换/变量展开吃掉，而**退出码仍然是 0**——对方收到一份从中间断掉的残稿，
+你这边看到的是「发送成功」。实测发生过：一条提醒到达时只剩 464 字符，断在代码块开头，后半段整段消失。
+
+- 判据：`code=0` / exit 0 只证明消息上了墙，**不证明正文完整**。证明完整性要调
+  `GET /open-apis/im/v1/messages/<message_id>` 回读 `body.content`，比对长度并抽查尾部段落。
+- 做法：正文先 `write_file` 落盘，再传文件路径（`--file` 模式），正文全程不经过 shell 字符串。
+- **`"$(cat file)"` 这种用法是安全的**：实测文件里放反引号、`$()`、未定义变量，经 `"$(cat file)"` 传给 argv
+  后原样到达——命令替换的**输出**不会被二次求值。所以旧脚本不改也能用，只要正文来自文件而不是内联字面量。
+  危险的是 `"<字面正文>"`，不是 `"$(cat …)"`。
 
 ## Pitfalls
 

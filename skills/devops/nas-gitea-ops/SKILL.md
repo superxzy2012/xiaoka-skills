@@ -178,6 +178,68 @@ with the **`deploy_key.id`** (not `key_id` — the table has both) → 204.
 Also check `protected_branch` for the repo: no protected branch means the key can push `main`
 directly, with no PR step to explain to the peer.
 
+## 服务账号 + token 生命周期（给外部/半信任 peer）
+
+一个 peer 一个账号，权限只到它需要的那一个仓。建号走 §2，授权走 §3，然后按下面三步收口。
+
+### 最小权限要用硬证据证明，不是声明「我只授了 X」
+
+三条实测，全部一次调用，比读协作者列表可靠：
+
+```bash
+# ① 逐仓 push 位（admin/push/pull 三个布尔）
+for r in <owner>/<repo> <owner>/<other1> <owner>/<other2>; do
+  curl -s -H "Authorization: token $TOK" "$B/api/v1/repos/$r" \
+    | python3 -c 'import sys,json;p=json.load(sys.stdin).get("permissions",{});print(p.get("push"),p.get("admin"))'
+done
+# ② admin 面必须 403
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: token $TOK" "$B/api/v1/admin/users"
+# ③ git 层真写（临时分支推上去再删）
+```
+
+**公开仓的 200 不是权限。** 目标仓若是 public，匿名 GET 也返回 200 —— 判据是同一 GET 里的
+`permissions.push`，不是状态码。
+
+**细粒度 token 下 `GET /api/v1/user` 返回 `login=null` 是正常的**，不是 token 坏了：scope 只有
+`read/write:repository` 时没有 user 读权限。别据此重建 token，用 ①②③ 判。
+
+### token 的有效期：API 可能静默忽略，别信文档
+
+**实测 Gitea 1.27.3 的 `POST /api/v1/users/<login>/tokens` 会静默丢弃 `expires_at`**：传了 90 天，
+响应里根本没有这个字段，`created_at` 还回 `0001-01-01T00:00:00Z`。也就是说 API 签出来的 token
+**实质永久**。验证方式固定：先建一个一次性探测 token 带上 `expires_at`，读**完整响应**看字段在不在，
+再删掉——不要按文档假设「传了就生效」，也不要在回执里写「已设 90 天」。
+
+补偿（等价硬到期）：写一个按 `--account/--name` 精确吊销的脚本（幂等：目标不存在返回 0），挂一条
+cron 在目标日期跑，再挂一条提前 7 天的提醒。脚本要点：
+
+- 从 600 凭据文件读 admin 账密，不内联；
+- `GET …/tokens` 列名 → 命中才 `DELETE`；
+- **删除后回读**：列表里消失 + 拿该 token 明文打一次 API 必须是 `401 invalid username, password or token`；
+- 建 cron 时若账号/ token 名还可能变，**建成 paused 并写 `paused_reason`**，别建一个到点跑空的任务。
+
+**token 值只在创建那一刻返回一次**（`sha1` 字段），之后列表里 `sha1` 恒为空、只留
+`token_last_eight`。所以：创建响应必须当场落 600 文件；回执/群聊只报前 4 位 + 后 4 位指纹。
+
+### 禁用 = 零成本可逆的containment，优先于删号
+
+```bash
+PATCH /api/v1/admin/users/<login>  {"active":false}     # 200，且 GET 回读 active=false 复核
+```
+
+- 协作者授权**不受影响**（`/collaborators/<login>/permission` 仍是 `write`），所以 `active:true`
+  一句话就恢复，不删号、不改权、不动仓。
+- 禁用后该账号的 token 打 API 返回 **`403 This account is prohibited from signing in`** ——
+  和 token 被吊销的 **`401 invalid username, password or token`** 是两个不同的信号，别混。
+- 一个来源待查的服务账号，先禁用再谈去留；删除是不可逆的，而「来源不明 + 关键仓 write」不能悬着。
+
+## 溯源：这个账号是谁建的
+
+拿到「有个不该出现的账号」时：**先禁用（可逆）+ 上报，不自行删除**；行为合规不等于来源可接受。
+日志层能拿到什么、拿不到什么，以及最有价值的「请求序列行为指纹」，见
+`references/account-forensics.md`。一句话结论：真实 IP / UA / 调用者都查不到，但
+`422 → 201 → 204 → GET permission` 这种序列能直接判出「带重试和事后校验的脚本」而不是人。
+
 ## Mirror a GitHub repo into Gitea
 The pushing side needs READ access to the GitHub source with sufficient token scope. If your token
 only has `public_repo`, a *private* source returns 404 — you cannot read it, so you cannot pull it.
@@ -404,5 +466,9 @@ PREV==TAG，对比逻辑失效；③ 告警已在正文用 ⚠️ 标出，**退
   table state at the end. Run it inside the gitea container via `docker exec -u git -i`.
 - Peer repo onboarding — registering a peer's key and realigning an unrelated-history repo onto the
   bus: `references/peer-repo-onboarding.md`.
+- 账号溯源（来源不明 / 建号时间对不上时，日志能查到哪一步）：`references/account-forensics.md`。
+- token 到期硬吊销脚本（gitea API 不支持 `expires_at` 时的补偿，可挂 cron）：
+  `/opt/data/scripts/gitea_token_revoke.py` —— `--account <login> --name <token名> [--dry]`，
+  幂等（目标不存在返回 0），删除后自带回读校验。
 - Account/credential delivery over chat: `feishu-bot-group-mentions` (230013 bot-DM block + relay path).
 - Bus envelope contract & secrets delivery: `a2a-file-bus`.

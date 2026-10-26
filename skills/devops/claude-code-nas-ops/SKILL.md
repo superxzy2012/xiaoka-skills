@@ -21,6 +21,16 @@ NAS（DXP4800-【BOSS英文名】 / 192.168.199.2）上独立跑一个 Claude Co
 | 后端 | OmniRoute `http://192.168.199.2:20128`（Anthropic `/v1/messages` 原生支持） |
 | 版本 | Claude Code 2.1.308 |
 
+## 远程验证（从小卡容器/其他机器）
+
+小卡容器里没有 docker，验证走 SSH：`ssh -i /opt/data/.ssh/id_ed25519 DY@192.168.199.2`，容器命令前缀 `sudo -n /usr/bin/docker exec`。三步由浅入深：
+
+1. **health 预检**（2s）：`curl -s -m 8 http://192.168.199.2:3111/health` — 返回 ok + 当前 fast/deep 模型即服务在。只是服务在 ≠ 模型能干活，别就此收工。
+2. **快档工具调用实测**：按下方「实测命令」，经 SSH 跑 `--model naswb/deepseek-v4.1-flash`，判定依据是文件真落盘。
+3. **深档工具调用实测**：同上换 `--model a2a/glm-5-3`（GLM 慢，给足超时 300s）。
+
+批量探测存活主机时，`&` 后台并行会被终端拒绝，用串行 for 循环 + `timeout 1 bash -c "echo > /dev/tcp/$ip/22"`（22 端口存活 ≠ 能登录，还要拿用户名/密钥逐一试）。
+
 ## 三种调用方式
 
 1. **Web**：浏览器开 3111，输 `.cc_token`。输入框左侧三态按钮 ⚡自动 / ⚡快 / 🧠深思 可切档（存 localStorage）；`/api/chat` 请求体带 `{"model":"fast"|"deep"|<模型ID>}` 同样生效——**不是只能跑 `ANTHROPIC_MODEL` 那一个模型**。
@@ -39,7 +49,7 @@ Claude Code 依赖 Anthropic `tool_use` 协议。**必须在容器内实测**能
 |---|---|---|---|
 | `naswb/deepseek-v4.1-flash` | ✅ | 5s | 默认，不限量 |
 | `wbfree/global:deepseek-v4.1-flash` | ✅ | 6s | 不限量，sonnet 位 |
-| `a2a/sn-kimi-k3` | ✅ | 30s | 免费池智力最高（44），opus 位，商汤限速 |
+| `a2a/glm-5-3` | ✅ | 18s 起 | 智力最高，opus 位，疑难自动分流默认目标 |
 | `openrouter/minimax/minimax-m3.1-flash:free` | ✅ | 9s | 会 **429 冷却**，别当默认 |
 | `mac8081/GLM-5.3` | ⚠️ 半通 | — | 根因：Claude Code 工具定义 30KB 超 AFS 输入上限被丢弃；网关侧压到 4.6KB 后隔离测试 3/3，但 AFS 上游需重登 GLM 网页会话，未验收，暂不用。**换掉 8081 的选型与部署见技能 `web-model-to-api-gateway`** |
 

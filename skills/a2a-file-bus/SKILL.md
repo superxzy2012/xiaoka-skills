@@ -228,6 +228,11 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
   `/volume2/2-AI/A2A/secrets/x` 是**同一个文件**，任务书里「落 ~/A2A/secrets 并同步到 NAS 工作目录」说的是一处。
   动手前 `ls -ld ~/A2A` 确认是软链还是本地目录，别把「同一个路径」当两步做，也别据云 peer 的经验假设它可写。
 - 群聊里只报「路径 + 指纹（前 9 位…后 4 位）+ nonce」，token 原文不进群、不进信封。
+- **凭据一旦出现在聊天里，当作已泄露：立即轮换 + 清掉所有落盘副本。** 轮换只是吊销旧的、重签新的；
+  清副本才容易漏——抓页面回帖时存下的 `*reply*.txt`、试权限用的临时 clone 的 `.git/config`（token 在
+  remote URL 里）都会静默带着明文。做法：先轮换，再 `grep -rl "<旧token>" /opt/data/cache /opt/data/secrets`
+  并逐个删/改，最后再 grep 一次确认零命中；模板文件只留占位符，真值从 600 文件读进内存再发送。
+  交付时直接告诉对方「建议你事后轮换」不如自己先轮换——它已经在日志里了。
 
 **hive MCP 鉴权实况（2026-10-19 实测）**：`3456`/`3458` 的 `/mcp` **不校验 Bearer** —— 无 token、假 token、
 真 token 都 200，`initialize` + `tools/list` 均通过（`tools/list` 各返回 1 个工具 `obsidian`）。
@@ -245,6 +250,8 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
   `references/hermes-container-boundary.md`.
 - MCP token 签发（版式 / 指纹 / 回执 / 两句必说的实话）：`references/mcp-token-issuance.md`
 - 远端 worker 接入（Windows peer 的脚本、幂等、验证方式）：见下 §已接入的远端 worker
+- peer / 中继端口可达性分层判定（丢包 vs 被拒、对照组、双边抓包对账）：
+  `references/peer-reachability-triage.md`
 - GitHub 公开脱敏镜像（SSH over 443 判据表、部署密钥、代理回退、补推）：见下 §GitHub 公开镜像
   + `references/github-mirror-transport.md`
 - Chat-side handshake (who to @, proving the mention landed): `feishu-bot-group-mentions`.
@@ -307,4 +314,76 @@ PROTOCOL 第 7 条：token/密码只放 `secrets/`，不进 task/receipt 正文�
 - **判定 cron 是否真成功看 job 的 `last_status` / `last_error`，不要只看脚本 stdout。** 修好之后、下一轮跑之前，job 里仍挂着上一轮的 error；反过来 stdout 静默也可能是 flock 让路而非成功。
 - **「镜像 HEAD 卡住 >30min」先三分类，别直接重启进程。** 静态 HEAD 有三种成因：①**源仓空窗**——那段时间 Gitea 本来就没有提交，HEAD 不动是正常的；②**提交全在白名单外**——`state/audits`、`outbox` 单独提交，内容变了但镜像看不见，零 diff 自然不产生 commit；③真停摆。判定证据链固定两条：`cron/executions.db` 里该 job 逐轮的 `status`/`error`（有没有跑）+ 源仓 `git log --name-only` 逐笔比对改动路径是否落在镜像范围内（有没有东西可搬）。两条都正常就是 ①②，kill 进程、重装、改 cron 全是白工。
 - **别顺着 peer 的诊断结论修。** 对方的 `diag_*.json` 可能把「白名单过滤」写成「sync job stopped」；照它重启只会浪费一轮。用上一条自己判，并在回执里**点名纠正**那句错误结论——否则错误根因会继续在群里传播，下一个人再按它修一遍。
+### 双向化改造：去 force + rebase + 回捞 + inbox 入镜像（main 单通道）
+
+公开镜像原本 `push --force` 重建 main，等于**把 peer 直推的东西下一轮抹掉**；同时不含 `inbox/`，peer 永远「没有任务」，回路是断的。四件必须一起改，缺一件就白改：
+
+1. **去 force**：非 ff 时 `fetch origin` → 把本地镜像提交 `rebase origin/main` → 普通 push。冲突 `rebase --abort` + 告警 + 本轮不同步，**绝不 fallback 到 force**（宁可停一轮，也不静默覆盖 peer 的提交）。
+2. **回捞（G2）**：fetch 后若 swarm 有 gitea 没有的提交（`outbox/receipt_*_muse.json` 这类 peer 独有产物），commit 回 gitea 正本；推不回就告警，别只 print 一句「N 个未回捞」当交差。
+3. **inbox 入镜像（G4）**：把 `inbox` 加进 `EXTRA_DIRS`，否则 peer 侧看不到派单。验证看 commit message 的计数变化（`tasks=12 → 13`）。
+4. **顺序（G3）**：先改镜像并实跑验证一轮，**再**让 peer 跑 push 测试；反过来测通也会被下一轮抹掉。
+
+**rebase 必须带 identity，否则假冲突。** 脚本里 commit 用了 `-c user.name/-c user.email`，但 `git rebase` 自己也要建提交——镜像工作树没有 global identity 时 rebase 直接失败，被护栏当成「真冲突」abort，报出来的 ALERT_DIVERGE 是假阳性（手工带 identity rebase 一次就过）。定义 `REBASE = ["git","-c","user.name=…","-c","user.email=…","rebase"]`，**所有** rebase（含 `--abort`）都用它，别只改 push 那一处。
+
+**双通道必然分叉，只留一条写路径。** 曾并行存在「main 镜像回路」与「独立 `muse` 分支 relay（每 5min 下发/回收）」两套设计，文档还互相声称对方不可用。裁决方式：以**真回执跑通的那条**为准（main：peer 提交 → 下一轮 ff 叠加未被冲 → gitea 回捞成功），另一条 cron `pause`、分支留作只读存档不删、文档里把作废理由写进原文（不删旧内容），否则下一个人照旧文档再搭一遍。
+
+**给 peer 下单走 CDP 时**：attach 既有已登录标签（`Target.attachToTarget`），`Input.insertText` 填文本 + 点 `aria-label=发送`（按钮常常无文字、只有一个 svg，靠 `getBoundingClientRect` 定位到 textarea 右下方）；全程不 `createTarget`、不 `closeTarget`、不 `bringToFront`。发送成功判据 = textarea 值被清空，不是按钮 click 返回。回帖取证用「body.innerText 增长量 + 连续两轮长度稳定」判流式结束，再截图。
+
+**attach 之后每条命令都必须带 `sessionId`，否则静默跑在浏览器层。** `Target.attachToTarget` 返回的
+`sessionId` 要拼进后续**每一个** CDP 消息体（`{"id":n,"method":…,"params":…,"sessionId":sid}`）；
+漏了就变成 browser-level 调用，`Runtime.evaluate` 返回空、`document.querySelector(...)` 读到 `None`——
+表现是「页面没有这个元素」，而实际是**消息发错了会话**。自检方式：填完立刻读 textarea 长度，应等于
+你插入的字符数；读到 `None` 就回头查 sessionId，不要改选择器。另外两个同族小坑：WebSocket 握手
+`403 Rejected an incoming WebSocket connection from the http://127.0.0.1:<port> origin` 需要
+`suppress_origin=True`（或直接连 `/json/version` 的 browser-level WS 再 attach）；
+`json.load(urlopen(...).read())` 在 Python 3 会 `AttributeError: 'bytes' object has no attribute 'read'`，
+必须先 `.decode()`。
+
+**peer 可以拒收一份「它不是从自己的委托人那里拿到的」任务书，这是正确行为。** 它停下来问「请你用
+自己的话告诉我做什么、做到哪一步」时，**不要重发同一份文件、也不要用「这份单已经落库了」施压**——
+换一封自己写的指令，自带范围与边界（「只跑只读探测；不用 token；不建隧道；不写仓库；把原始输出贴回」），
+并在里面明确不需要它信任任何文件。发指令与它实际执行是两件事：它拒绝那一次不代表通道坏，只代表
+**授权链路没走它认的那条**。
+
+**要两个视角对账时，要求对端自己打时间戳。** 让另一个观察方（抓包/日志）按秒对齐时，指令里必须写死
+`date '+%Y-%m-%d %H:%M:%S %z'` 并在**每条探测前**各打一次；只让对端贴结果，两边永远对不上，等于白测。
+
+**托管沙箱（muse.ai 这类云电脑）里 `succeeded` 不等于通：先看解析出的 IP。** 实测它的 MagicDNS 被沙箱
+出口代理劫持，`nc -vz friday-bridge.tail95c8b3.ts.net 443` 返回 `succeeded!` 但括号里是
+`(198.18.199.94)` —— 198.18.0.0/15 是 RFC2544 保留段，代理专用假地址，包根本没离开沙箱；同一时刻直连
+tailnet IP `nc 100.119.150.22 443` 是 `Operation not permitted`（沙箱禁直连）。它自己贴的系统说明写得很清楚：
+`Ordinary networking does not reach the tailnet … Reuse the runtime HTTP proxy, changing only its port to 3130`、
+`Other TCP clients, including SSH, must use the same HTTP proxy with CONNECT support`、
+`direct curl/SSH, ping, ICMP, and UDP do not test this path`。
+⇒ 三条硬判据：① 解析 IP 落在 198.18/15 或 198.19 就是代理劫持，不是对端；② 对照组也「通」正是劫持特征
+（真实链路不会连对照靶都成功）；③ 真通道只能走 runtime HTTP proxy + CONNECT（SSH 用
+`-o ProxyCommand='nc -X connect -x <proxy>:3130 %h %p'`），且首次 CONNECT 到某地址需用户在对端权限页批准一次，
+批准期间不要重试。
+
+**对端自述「原始输出原样如下」而正文是空的，是常见形态，不是偶发。** 同一会话里它能连续两次这么写、
+只留一句「443 和 22 都是通的」，一个 `rc=`、一行时间戳都没有。处置：不要跟它争，直接把要求写死
+（「把终端里真实出现的文字整段复制过来，包括 succeeded / refused / timed out / rc= 的数字，不要总结」），
+它下一次就会贴。判定「有原文」的方法是自己抓页面全文再 grep 关键串（`succeeded`、`rc=`、
+`2026-` 时间戳行），而不是读它那段总结——自述与正文必须分开验。
+
+**Gitea 1.27.3 的 token API 静默忽略 `expires_at`。** POST 建 token 时带上该字段返回 201，但响应体里
+**没有** `expires_at`（不是写错格式，是被忽略），所以签不出真正的过期 token。补偿方案 = cron 硬吊销 +
+到期前 7 天提醒，两条验收缺一不算完：① 建好后手动跑一次 `--dry`，确认能列出**目标 token 名**（别到
+到期日跑了个空）；② 真删后拿该 token 明文回打 API，必须返回 `401 invalid username, password or token`，
+把原始响应贴给对账方。吊销脚本要幂等（目标不存在返回 0），删前删后各列一次 token 列表。
+**溯源上限**：Gitea 默认 access log **不记 User-Agent**（`app.ini` 只有 `LOG_SQL`），历史请求无法回溯 UA；
+容器内来源 IP 经 docker 网关 NAT 后全是 `172.22.0.1`（自己发请求对照同样如此），审计 API 在 1.27 默认关闭
+（`/api/v1/admin/audit-logs`、web `/admin/audit-logs` 全 404）。到这一步就如实说「查到日志极限」，
+不要用「大概是某个人」填空——但行为链本身仍是证据：`PUT collaborator 422`（先授权发现没号）→ `POST 201`
+（建号）→ `PUT 204`（再授权）→ `GET permission 200`（自查），这种带重试和事后校验的顺序说明是**脚本**，
+不是人手动。
+
+**归档/队列清扫必须三计数分列：命中 N / 实际 move M / 去重删除 D。** 「outbox 有回执或 processed 已有同名」只代表命中；其中 processed 已存在、inbox 那份只是重复的，只删 inbox 不 move（git name-status 里是纯 D，没有 A）。把三者混成一个「归档 N」会和对账侧的 `git diff --name-status`（D/A 对数）长期差 1——对方按文件系统 move 数核，你报的是命中数。日志要能直接对上 D/A 对数：move=D+A 成对、dedup=纯 D。
+
+**短文件加字段会让 git rename 相似度暴跌，R055 不是正文丢失。** 422B 的 JSON 加上 status/archived_at/obsolete 等字段变 701B，rename 检测相似度可能只到 55%（R055），看着像「丢了一半」。核正文是否完整要逐字段 diff，别拿 rename 相似度当完整性判据。
+
+**脚本解析 git 文件名必须先关 quotepath。** git 默认 `core.quotepath=true`，非 ASCII（中文）文件名在 `ls-tree/diff --name-only` 里被转义成带引号的八进制串（`receipt_A2A-PING_friday_"\346\226\260hermes_…json"`），后续按正则/白名单解析会失配——尤其「远端独有提交是否都是 muse 回执」这类全量文件名判断，一个中文 friday 回执就会被误判为非白名单 → return 6 假告警。统一在封装的 sh() 里给所有 `git` 子命令前置 `-c core.quotepath=false`（多个 -c 可叠加，与 user.name 共存）。**位置铁律：`-c` 必须在子命令之前**——`git -c core.quotepath=false ls-tree …` 对；`git ls-tree -c core.quotepath=false …` 报 `error: unknown switch 'c'`（-c 是全局选项，不是 ls-tree 的开关）。程序化注入时插到 `cmd[1:]` 之前，别 append。
+
+**跨节点对账文件数先约定同一条命令。** `len(copied)`（本轮拷了几个）、`git ls-tree -r`（镜像树总数）、各业务目录分项求和是三个不同的数，两边各报各的永远对不齐，时间差还会再叠误差。固定一把尺：`git ls-tree -r <ref> --name-only | wc -l`（镜像树文件总数，含顶层文档），双方日志都打它。
+
 - **改完镜像范围，验证要在 GitHub 侧做，不在推送侧。** `PUSHED files=N` 只证明本地算出了东西：`gh api repos/<o>/<r>/git/trees/main?recursive=1 --jq '[.tree[]|select(.type=="blob")]|length'` 对总数，`gh api repos/<o>/<r>/contents/<新路径>` 解 base64 看正文首行，再抽查新增目录的 `.[].name`。最后把「修复回执」本身写进 `outbox/`——它会被下一轮镜像带走，等于用新范围自证。

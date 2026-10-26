@@ -761,9 +761,17 @@
    "ts": "2026-10-22T01:38:06",
    "topic": "效率工具",
    "recommended": true
+  },
+  "deekshithaswarna/ChronosAI": {
+   "skip": "low",
+   "ts": "2026-10-26T01:38:00"
+  },
+  "chen-985211/cleancode": {
+   "skip": "low",
+   "ts": "2026-10-26T01:38:03"
   }
  },
- "runs": 14,
- "last_run": "2026-10-22T01:38:06",
+ "runs": 15,
+ "last_run": "2026-10-26T01:38:03",
  "seen_ttl_days": 90
 }

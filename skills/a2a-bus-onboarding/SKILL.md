@@ -165,9 +165,50 @@ If the target runs as a container on this host, deliver through its mounted home
 - State which onboarding route you chose when more than one was offered, and why the other was
 deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env file where the target
   reads it; (2) **deploy key** — the target has no mount and no DM; (3) password over a human-relayed
-  private channel — last resort. Pick (2) early when (1) is unavailable: only a *public* key has to
+  Pick (2) early when (1) is unavailable: only a *public* key has to
   cross the wire, it can be posted in the group without leaking anything, and it is revocable per
-  repo without rotating an account password. See `nas-gitea-ops` §7 for the attach procedure.
+  repo without rotating an account password. See `nas-gitea-ops` §7 for the Gitea attach procedure.
+  When the bus lives on GitHub (no Gitea admin API, node is outbound-only), route (2) becomes a
+  **repo deploy key registered through the owner's logged-in browser and verified by SSH banner** —
+  full procedure in `references/github-deploy-key.md`.
+
+  **托管节点可能把整条密钥路线都封死。** 有些云托管 agent（平台禁止 sshd、禁止本地密钥对、禁止反向隧道，
+  只有单向出站）会**拒收**私钥 —— 那不是故障，是它按红线在保护你，改密钥格式重试只会让它把同一段拒绝
+  再说一遍。对这类节点改走：
+  - 首选 **HTTPS + fine-grained PAT**：仅目标仓、仅 Contents 读写、90 天；PAT 由仓库主私聊投递，
+    文档里只写 `<MUSE_PAT>` 这类占位符。
+  - 备选 **零凭据兜底**：节点把回执正文发到群里，由有推送凭据的一方代写 `outbox/receipt_*.json` 并 push。
+    零安装、零权限，代价是代提交方需在线。
+  - 私钥进过聊天记录即视为作废；**先查它是否真被登记过**（`gh api repos/<owner>/<repo>/keys`）再谈撤销 ——
+    常见情况是根本没加进去，白做一轮「撤销」动作。
+
+## 通道拓扑：镜像仓不是双向总线
+
+一个仓如果同时挂着「对外镜像」，它就不能当双向总线用。典型形态：`main` 由镜像脚本每 N 分钟从内网正本
+`git push --force` 重建 —— 外部节点推到 `main` 的回执**下一轮就被冲掉**，而且正本 `inbox/` 的任务正文
+按脱敏规则根本不入镜像，节点永远收不到活。节点自述 push 成功、API 也查得到那条 commit，看着一切正常，
+直到隔一个周期比对 `ls-remote` 才发现 HEAD 已换人。
+
+**判据（写进验收，不靠信任）**：登记完通道后隔一个镜像周期再 `git ls-remote <repo> main`，对比节点自报的
+sha；变了 = 它推的东西已被覆盖，通道是假的。
+
+**正确形状：每个外部节点一条专属分支 + 一个中继脚本**
+
+| 项 | 做法 |
+|---|---|
+| 分支 | `<node>` 独立 orphan 分支（`git init -b <node>` 后首推），与镜像的 `main` 完全隔离；镜像脚本只 force `main` |
+| 下行 | 内网正本 `inbox/task_*_<node>*.json` → 脱敏（剥 detail、打码 IP/凭据）→ 分支 `inbox/` |
+| 上行 | 分支 `outbox/receipt_*_<node>.json` → 写回正本 `outbox/` → **再从分支删除**（防重复回收） |
+| 幂等 | 分支上已有的任务不重复下发；正本 `processed/` 里有的任务一律不下发 |
+| 调度 | 纯脚本 cron（`no_agent`），不要每轮唤醒模型 |
+
+`processed/` 那道闸是必需的：正本里躺着的过期任务会在中继首跑时被当成新任务下发给节点，节点照做过期指令
+（例：已被新方案取代的建隧道任务）。归档动作本身也要在正本里做（`git mv inbox/x processed/x`），只删分支上的
+副本下一轮会被重新下发。
+
+现成实现：`/opt/data/bin/muse_relay.py` —— 正本克隆用临时 `GIT_ASKPASS`（700，用完即删），分支走 deploy key 的
+`GIT_SSH_COMMAND`；回收后 commit 回正本 `main`，push 失败先 `pull --rebase` 再推。分支命名沿用蜂群既有惯例
+（`xiaodou/m2-backup-drill` 这类按节点分叉），不要另造一套。
 
 ## Pitfalls
 
@@ -213,6 +254,39 @@ deferred. **Route choice, in order:** (1) shared filesystem — drop a `600` env
     `outbox/receipt_*.json` stays untracked, so the commit is empty and the push reports nothing to
     do — which reads as "no write access" and sends you back to re-checking collaborators. Stage with
     `git add -A`, and confirm `git log -1 --stat` lists the path before treating a push as proof.
+
+13. **Locate the existing credential before generating a replacement.** A keypair may already sit
+    on another host's secrets dir (NAS `A2A/secrets/`, the local `secrets/`, a prior receipt) while
+    only its fingerprint was ever quoted. Search by the key comment tag and the fingerprint already
+    promised to the owner before minting a new pair — otherwise the owner is asked to relay a key
+    whose fingerprint no longer matches what they approved, and two live identities now exist for
+    one node.
+
+14. **Read the task doc's current revision from the repo before reporting next steps.** Task
+    documents on the bus get revised in place (an account-token plan superseded by a deploy-key
+    plan, for example), and an earlier revision still reads authoritative in your context. Pull the
+    latest `tasks/<name>.md` from the repo (the receipt names the file) and check its version
+    before telling the owner what to do — quoting the dead plan sends the owner to perform a step
+    that was already automated away.
+
+15. **仓库 slug 必须现查，不能凭记忆写进接入文档。** 落笔前先 `gh repo list <owner>` 拿真名：
+    写错一个词，对端拿到的是 `Repository not found`，读起来像权限/认证问题，会让人在 PAT、分支、
+    凭据上白查好几轮，而真正要改的只是文档里那一个字符串。
+
+16. **对端「一直在报同一段话」时，先分清它是拒绝还是故障。** 反复出现的固定文案（尤其提到密钥、
+    权限、安全）多半是对端的安全拦截在正常工作 —— 改配置、换参数都不会让它消失，只会再拒一次。
+    正确处置：停掉触发它的东西（私钥、错 slug、不该发的凭据），换成对端明确接受的路线，
+    并把「这是拒绝不是 bug」先告诉 BOSS，否则他会一直以为你在修一个坏掉的东西。
+
+17. **托管 agent 的密钥落位跟着 `ssh` 的实际运行身份走。** 平台 shell 常以 root 跑 ssh，密钥与 config
+    放用户家目录（`~/.ssh`）根本不会被读到，表现为握手静默 fallback 到 22 端口 + 默认密钥。先确认
+    `id -un` 与 ssh 真正读的目录再落位；首连还要 `ssh-keyscan -p 443 ssh.github.com >> <ssh 的 home>/.ssh/known_hosts`，
+    否则报 `host key verification failed` —— 那不是 key 的问题。
+
+18. **出站被平台掐断时，报错里带的是平台自己的话术，不是网络故障。**
+    `kex_exchange_identification: banner line 0: <平台>: Outbound SSH is turned` 配
+    `Connection closed by <代理IP> port 3128` = 平台权限层的 Deny，需让 owner 在平台设置里把 ssh 由 Deny 改成 Ask。
+    这时改密钥、换端口、换仓库名全都无效，只会多一轮「同一段拒绝」。
 
 ## Credential hygiene (non-negotiable)
 
