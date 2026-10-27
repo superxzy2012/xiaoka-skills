@@ -121,6 +121,47 @@ OmniRoute（`20128`）**暴露 Anthropic 原生 `/v1/messages`**。探活发空 
 
 配置 JSON、stdio 最小客户端流程、免费模型候选表、ACP 是否真被调用的判别法 → `references/acp-claude-code.md`。
 
+## 2c. 接飞书：扫码创建机器人
+
+见 §6.7（唯一权威版本，含完整流程与坑）。
+
+## 2d. 用固定短码注册自定义专家（Agency 八专家实战）
+
+HTTP `POST /api/agents` **不接受自定义 agent_id**（自动生成 6 位随机码）。要固定短码（如 `PRICE`）必须走容器内 embedded runtime 直接 `AgentCreateSpec(agent_id=...)`：
+
+```python
+from octop.cli.repl.embedded_session import embedded_runtime
+from octop.infra.agents.manager import AgentCreateSpec
+async with embedded_runtime() as server:
+    await server.app_runtime.agent_registry.create(AgentCreateSpec(
+        name="定价分析师 · 单位经济", agent_id="PRICE", user_id=1,
+        default_model="a2a/deepseek-v4.1-flash", template_name="general-assistant"))
+```
+
+### 🔴 铁律：「写入成功」≠「已生效」
+
+任何绕过 HTTP API 的写入（embedded runtime 建 agent、直接改 DB、改容器内文件、改 compose）**写完之后必须 reload / 重启 + 回读**。写入返回成功只证明落盘，运行中的进程可能完全不知道有这回事——表现是「接口 200、日志无错、调用永远不回」。
+
+### 三个必踩坑（按出现顺序）
+
+1. **embedded create 只写 DB，运行中的 server 不认识新 agent** → WS `[accepted]` 但**永不回话**，PING 挂到超时（表现为 rc=124 / 空输出），日志里只有 accepted 没有报错。
+   **必须补一步**：`POST /api/agents/{id}/reload`（204）。之后 PING 才通。
+2. **`template_name` 必须是 22 个内置专家 id 之一**（`general-assistant` / `stock-assistant` / `office-automation` / `news-trend` / `ops-engineer` / `ai-safety-guardian` / `multi-agent-orchestrator` / `wechat-ops` …）。传不存在的名字（如 Agency 的 `pricing-analyst`）**不报错，只 logger.warning 后 skip** → 不生成 `.octop/manifest.json` → bootstrap 卡死。查全量：`GET /api/experts`。
+3. **`agent_id` 是 workspace 目录名，正则 `^[a-zA-Z0-9][a-zA-Z0-9_-]{1,62}[a-zA-Z0-9]$`（3-64 字符）**。`QA` 只有 2 字符 → `AGENT_ID_INVALID`。绕法：注册成 `QA1`，CLI/worker ALIAS 里把 `QA`/`质检`/`小质` 都映射到 `QA1`，对外仍叫 QA。
+
+### 正确顺序（已验证）
+```
+① 备份 DB + agents/ 目录 + CLI/worker
+② embedded create（agent_id=CODE, template_name=<内置id>）
+③ 覆盖 workspace 的 SOUL.md / IDENTITY.md 为自定义 persona
+④ 改 .octop/manifest.json 的 label.zh / description.zh（否则界面显示基底模板名）
+⑤ POST /api/agents/{id}/reload   ← 缺这步必挂
+⑥ 逐个 WS PING（首次含 bootstrap，慢 40-125s；之后快）
+```
+⚠️ `reg.delete()` 是 **async**，不 `await` 会静默不删，接着 create 就报 `agent name ... already in use`。
+⚠️ 重建前先 `shutil.rmtree` 旧 workspace，否则残留文件干扰 seed。
+⚠️ 别用 `docker cp /dev/stdin` 传脚本进容器（会建成指向 `/proc/self/fd/0` 的坏软链）——用 `echo <base64> | base64 -d > /tmp/x.py`。
+
 ## 3. 坑（全部实测踩过）
 
 1. **容器默认无外网**：HF/模型下载、专家抓行情全失败。compose 里加 `HTTP_PROXY`/`HTTPS_PROXY=http://192.168.199.2:7891` + `NO_PROXY` 白名单后 `docker compose up -d --force-recreate`。
@@ -151,7 +192,8 @@ OmniRoute（`20128`）**暴露 Anthropic 原生 `/v1/messages`**。探活发空 
 16. **子代理安装端点是 `/subagents/install`，body 键是 `slug`**：`POST /api/agents/{aid}/subagents/install {slug:<catalog slug>, locale:"zh"}`。往 `/api/agents/{aid}/subagents` POST 不管 body 怎么变都失败——**猜端点前先 `grep -rn "subagents" /app/src/octop/api` 再 `sed -n '<行>,<行>p'` 读路由签名**，比试三四种 body 快得多。
 17. **`POST /api/browser/install` 客户端超时 ≠ 失败**：返回 `-1 TimeoutError` 后查 `GET /api/browser/env-status` 常常是 `browsers_ok: true`（Chromium 落 `/root/.cache/ms-playwright/chromium-*`）。装完只认 env-status，别因超时重装。
 18. **决策模型是 `PUT /api/settings/decision`**：`{enabled,provider:"jev",endpoint:"http://192.168.199.2:8082",model:"jev-latest",threshold:0.6,tool_min_count:8}`，PUT 完 GET 复核。JEV 只做「这一轮要不要调工具」的分类层，不接管主模型。
-19. **别用「轻量」形容 Octop 的成本**：`GET /api/usage/summary` 实测近 30 天 **62,399 tokens/轮**（缓存命中 77%，真新增约 7k/轮）。对外讲成本一律引这个数——凭感觉说「几百到几千」会被自己的实测打脸。
+19. **`PATCH /api/agents/{aid}` 回 200 ≠ persona 生效**：8 个 Agency agent 建好后 `system_prompt` 全是 **null**，SOUL.md/IDENTITY.md 只在 workspace 文件里、**不进模型上下文**，于是模型拿基底模板名自报（「助理」「测试工程师」）。修法：`PATCH {"system_prompt": "# 你是<岗位>（code <CODE>）\n<职责>\n\n输出纪律：…"}` + `POST /api/agents/{aid}/reload`，然后**问一句「你是哪个岗位」验回显**——只看 200 和字段长度不够。
+20. **别用「轻量」形容 Octop 的成本**：`GET /api/usage/summary` 实测近 30 天 **62,399 tokens/轮**（缓存命中 77%，真新增约 7k/轮）。对外讲成本一律引这个数——凭感觉说「几百到几千」会被自己的实测打脸。
 
 ## 3b. 升级镜像
 
@@ -188,7 +230,25 @@ ssh DY@192.168.199.2 'cd /volume2/2-AI/octop && sudo -n docker compose pull && s
 
 Octop 在 A2A 里的标准 id 是 **`octop`**（别名 `章鱼`）。身份卡 `/opt/nas/volume2/2-AI/A2A/agents/octop.md`。
 
-### 6.1 架构（为什么不用 Octop 自己轮询）
+### 6.0 🔴 回执必须真 push，工作副本绝不能放 scratch
+
+**「写到 NAS 本地 A2A/outbox」≠「上了总线」。** 正本是 Gitea `anc/a2a-bus`，本地共享目录 `/opt/nas/volume2/2-AI/A2A` **不是 git 仓**。
+
+- 工作副本固定用 **`/opt/data/a2a-bus`**（`a2a_commit.py` 的 `WORK`）。曾写 `WORK=/opt/data/cache/scratch/a2a-dispatch`，**scratch 24h 自动清理**把仓删了 → commit 从未发生，对端 `cat-file` 永远 404。
+- 交付后自检三连（贴原文，不得改写）：
+  ```bash
+  git -C /opt/data/a2a-bus log --oneline -3
+  git -C /opt/data/a2a-bus status --short
+  git -C /opt/data/a2a-bus push origin HEAD:main   # 贴 rc + 最后三行
+  git cat-file blob <sha>:outbox/receipt_<ref>_<from>_<ts>.json | head
+  ```
+- **`results/` 在正本有（29+ 文件），公共镜像不带**。回执里 `result_file` 必须写**相对仓根**的路径（`results/result_….md`），否则对端无从核。
+- `result_sha256_8` 要与实际文件逐字节对得上：`git cat-file blob <sha>:<path> | sha256sum`。**改了 result 必须告知 sha 已变**，不能默默换值。
+- 🔴 **交付物不可变**：已 push 的回执/result 不改历史字段。需修订就写新回执 `…_r2.json`，带 `revision` / `supersedes` / `prev_result_sha256_8` / `result_sha256_8` / `reason`，由旧值指向新值——对端才能同时核到两版。
+- **镜像不带 `results/`**（正本递归 1519 文件，含公司线业务内容，有泄露面）。要给外部单份读，复制到 `reports/` 或单独放行，不整目录开。
+- 对账口径：`git ls-tree -r <ref> --name-only | grep -c '^results/'`（递归），**不是** `ls results/ | wc -l`（非递归，两回事）。
+
+## 6.1 架构（为什么不用 Octop 自己轮询）
 
 Octop 容器看不到 A2A 共享盘（没挂 `/volume2/2-AI`），所以**由小卡侧代跑 worker**：Hermes 容器读 `inbox/` → 调 Octop WS → 回执写 `outbox/`。
 
@@ -196,8 +256,36 @@ Octop 容器看不到 A2A 共享盘（没挂 `/volume2/2-AI`），所以**由小
 |---|---|
 | worker | `/opt/data/bin/octop_a2a_worker.py`（单次扫描即退出） |
 | 包装 | `/opt/data/bin/octop_a2a_poll.sh`（显式调 venv python + `--quiet`） |
+| 常驻守护 | `/opt/data/bin/octop_a2a_daemon.sh`（30s 一轮，flock 单实例，`INTERVAL=${OCTOP_POLL_INTERVAL:-30}`） |
+| 健康检查 | `/opt/data/bin/octop_healthcheck.sh`（+ cron `9491e8eba0db` every 5m） |
+| 群内直触发 | `/opt/data/bin/octop_grp.py`（见 §6.8） |
 | cron 副本 | `/opt/data/scripts/octop_a2a_poll.sh`（**cron 只收相对路径**） |
-| cron job | `f96e2da0aa99`「Octop A2A 轮询」`every 3m`，`no_agent=true` |
+
+**30s 周期只能用常驻守护，不能用 cron**：调度器 interval 只到分钟粒度。改用守护后**必须把旧 cron `f96e2da0aa99` 置 paused**，否则两套轮询并发抢同一批任务（靠锁不会双跑，但会互相 SKIP 造成「投了没人处理」的假象）。
+
+守护要点：
+
+- `flock` 锁 `/opt/data/logs/.octop_poll_daemon.lock` 保证单实例；重复启动直接退出，不报错。
+- `--quiet` 跑 worker，输出里只 `grep -F '【OCTOP:'` 转管理群，其余进本地日志 `/opt/data/logs/octop_a2a_poll.log`——**别把 IDLE/SKIP 转发出去**，30s 一次会刷屏。
+- 用 `terminal(background=true)` 起，别用 `setsid`（`setsid` 经 ssh/包装层常返回 exit -1 但进程其实起了，误判成失败）。
+- 判活：`pgrep -fc octop_a2a_daemon.sh`。**pid 变了就是重启过**，别拿旧 pid 当活着的证据。
+
+**healthcheck 判据三合一**（缺一条就漏）：`/api/health` 返回 `ok:true` + `agents_running >= 注册表推导值` + `pgrep -fc octop_a2a_daemon.sh` 非 0。异常时自动拉起守护并往群里发 `⚠️【OCTOP:HEALTH】`。容器重建后 agent 全部消失、守护静默空转——这是最容易被忽略的断点，只有 agents 计数能发现。
+
+四条硬规矩（判据必须能自证，否则没人说得清「这个数字是谁定的」）：
+
+1. **阈值不许手写常量，从真相源推导**：`GET /api/agents` 取 `agent_id` 去重计数（`/opt/data/bin/octop_expect.py`），增删 agent 自动跟随。写死 `17` 或把 `OCTOP_EXPECT_AGENTS` 当默认值，下次扩容就变假告警、缩容就变假绿。
+2. **state 里带来源字段**：`expect_agents` / `expect_source`（`registry`｜`override`｜`unreachable`）。🔴 **`state/` 是镜像公共面，不放内部标识明细**（agent code/open_id），ids 明细另落 `reports/octop-expect-latest.json`（正本可读、不进镜像），state 用 `expect_detail` 指针指过去。推导失败判 `expect_unreachable`，**不要**回退到默认数字——那会让「探不到注册表」伪装成健康。
+3. 🔴 **测试注入永不写共享审计通道**：验告警态可以用 `OCTOP_EXPECT_AGENTS=99 sh …`，但 override 只写本地 state、**不 commit 不 push**（push 前置 `[ "$EXPECT_SOURCE" != "override" ]`）。曾把测试值推上正本总线，对端看到 `agents_running=17<99` 只能追问「是不是把阈值调低了刷绿」——审计通道被测试污染，真实告警也失去可信度。已入 `PROTOCOL.md` v2「测试态永不推正本」。
+4. **变更判据用指纹不用时间戳**：`ts_utc` 每轮都变，整文件比对或无条件 commit 会 5 分钟一条垃圾 commit，把真告警淹没。指纹 = `status|agents|expect|source|daemon|problem|cksum(EXPECT_JSON)`（末项保证数量不变但成员换了也触发），变了才推。
+
+另：判据脚本在 NAS 本地、对端看不到，把快照 + 推导说明提交到总线 `reports/`（`octop_healthcheck.sh` / `octop_expect.py` / `octop_mirror_lag.py` / `octop-health-expect-derivation.md`），改判据才有 `git diff` 可追。协议层规矩（交付物不可变 / 测试态永不推正本 / 公共面脱敏 / 回执 `result_visible_in_mirror` 字段 / 公共面指针须配 `*_in_mirror:false` / 镜像新鲜度只认 GitHub API contents 不认 raw CDN）在总线 `PROTOCOL.md` v2。
+
+**镜像滞后告警归 QUEEN cron `4eb7d1003821`（10m，阈值 lag>45min / state 失配>30min），小卡侧 healthcheck 不重复挂镜像判据**（双套告警互相刷屏）。本地自查用 `reports/octop_mirror_lag.py`（v4）：正本读本地工作副本 `origin/main`，镜像 git-first（只读浅克隆 `/opt/data/a2a-mirror-watch` 读 FETCH_HEAD）+ **api.github.com 降级**（仅 git 失败时才走，先读 `X-RateLimit-Remaining`，为 0 绝不硬闯）；输出 `mirror_src: git|api` 标明来源；3 次重试 + `http.lowSpeedLimit=1000/lowSpeedTime=20`（传输阶段）；取不到回 `verdict=INCONCLUSIVE`（探针存疑，**不告警**，限流 403 也归此——「限流≠停摆」）；`lag_min` 钳到 >=0。
+
+镜像探针五坑（2026-10-27 实测）：①**不用 `api.github.com` 匿名 REST——60 次/小时**，耗尽 403 会被误读成镜像停摆；②不用 `raw.githubusercontent.com` 判新鲜度——CDN 缓存陈旧造成假阴性（QUEEN 撤回的那条），只认 API contents 或 git；③Gitea 匿名 API 404、creds.txt 的 arthur token 对 API 401（git 凭证可用、API token 不可用是两回事）；④`github.com:443` 出网不稳（一次 fetch 卡 133s、下一次 1.6s 成功，抽风型），必须重试 + 硬 timeout；⑤🔴 **`http.connectTimeout` 不是 git 配置键，写了被静默忽略——不报错也不生效，造成虚假安全感**（QUEEN 黑洞 IP 实测：带与不带均 25s 才被外部 timeout 杀）。connect 阶段（一个字节都没传时 lowSpeed 判据不触发）唯一有效兜底是**调用方 subprocess `timeout=`**；`http.lowSpeedLimit/lowSpeedTime` 只管已在传输的阶段。
+
+深度（state 字段表、推导器实现、三个自证实验）：`references/healthcheck-alerting.md`。
 
 ### 6.2 子路由（写在信封 `to` 里）
 
@@ -212,6 +300,21 @@ Octop 容器看不到 A2A 共享盘（没挂 `/volume2/2-AI`），所以**由小
 | `octop:阿文` / `octop:9VQHTY` | 一文多发 |
 | `octop:小调` / `octop:4GK9GF` | 任务编排 |
 | `octop:team:XJWVMB` | 跨境选品小队（多专家协同） |
+
+**Agency 八专家**（固定短码，注册方式见 §2d）：
+
+| `to` | 派给 |
+|---|---|
+| `octop:小定` / `octop:定价` / `octop:PRICE` | 定价分析师 · 单位经济 |
+| `octop:小供` / `octop:供应链` / `octop:SUPPL` | 供应链策略师 · 备货物流 |
+| `octop:小增` / `octop:增长` / `octop:GROW` | 增长黑客 · 低成本获客 |
+| `octop:小搜` / `octop:SEO` | SEO 策略师 · 搜索关键词 |
+| `octop:小号` / `octop:公众号` / `octop:WXGZH` | 公众号运营经理 · 选题涨粉 |
+| `octop:小抖` / `octop:抖音` / `octop:DOUY` | 抖音策略师 · 短视频直播 |
+| `octop:小质` / `octop:质检` / `octop:QA` / `octop:QA1` | AI 质检专家 · 产出质量门禁 |
+| `octop:小本` / `octop:本地化` / `octop:LOC` | 本地化策略师 · 跨境适配 |
+
+🔴 **新增/改名 agent 必须四处同时改，少一处就是静默错路由**：① DB `agents.agent_id` ② workspace 目录 `/data/.octop/agents/<CODE>/` ③ CLI `/opt/data/bin/octop` 的 `ALIAS` ④ worker `octop_a2a_worker.py` 的 `ALIAS`；另加 `octop_agents.json`、`octop_grp.py`。改完各跑一次 `octop:别名` 实测——**别名表里的短码写错不会报错，只会静默路由到不存在的 agent 然后超时**（曾把 `团队` 指到已删的 `WHEB5R`）。
 
 ### 6.3 任务信封
 
@@ -237,6 +340,9 @@ Octop 容器看不到 A2A 共享盘（没挂 `/volume2/2-AI`），所以**由小
 - 回执：`outbox/receipt_<task_ref>_octop_<YYYYMMDDTHHMMSS>.json`，字段 `receipt_id`/`task_ref`/`from:octop`/`to:<原 from>`/`ts`/`status`/`note`/`result_file`/`acceptance`。
   `acceptance` = `{p, pass, why, mode}`，观察模式验收结果，**不改 `status`**；样本矩阵与升硬拦的判据见 `a2a-file-bus` → `references/delivery-acceptance.md`。
 - 正文：`results/result_<task_ref>_octop_<ts>.md`（问题 + 回答 + 专家 id + 耗时）。
+- **群转发摘要行**：worker 处理完追加一行，守护只 `grep` 这一行转管理群，格式固定：
+  `【OCTOP:<agent_id>】<status> <结论前 120 字>｜<result_file 或 ->｜<result_file 的 sha256 前 8 位>`
+  保留 sha256 前 8 位是为了让收单方能拿摘要反查原件、确认没被改。改了这行格式等于改掉守护的抓取条件，两处必须同改。
 - 任务：处理完 `shutil.move` 到 `processed/`。
 
 ### 6.5 五个必知行为
@@ -281,7 +387,50 @@ ls -1t /opt/data/cron/output/f96e2da0aa99 | head -1
 
 只看到 `RUN` 不算完成，**必须看到 `DONE` + `result_file` 文件真实存在**。
 
-## 7. 验收清单
+## 6.7 飞书 channel：扫码一键建应用（2026-10-26 实测跑通）
+
+Octop 自带飞书官方「扫码创建应用」（`lark_oapi.register_app` 设备授权流，RFC 8628），**不需要人去开放平台手建应用**。
+
+### 流程
+
+```bash
+# 1) 容器内拉起创建器（前台会阻塞等扫码，用 -d + 日志）
+sudo -n docker exec -d octop sh -c 'cd /app && /app/.venv/bin/python3 -m octop.infra.gateway.bot_creators.feishu_bot_creator create > /tmp/feishu_creator.log 2>&1'
+# 2) 取二维码 URL（JSON 行里的 show_qrcode 事件）
+sudo -n docker exec octop sh -c 'cat /tmp/feishu_creator.log'
+# 3) 把 content.url 渲成 PNG 给 BOSS 扫（终端 ASCII 图 BOSS 扫不了）
+#    segno.make(url).save('qr.png', scale=12, border=4)
+# 4) BOSS 扫码确认后，finish 事件里给 app_id / app_secret / bot open_id
+# 5) 绑到 agent（main = 小通·通用助手）
+POST /api/agents/{aid}/channels  {"kind":"feishu","name":"feishu","config":{"app_id":...,"app_secret":...,"enabled":true}}
+```
+
+**验收硬指标**：① POST 回 201 且 `runtime.connected=true`；② `docker logs octop | grep Lark` 出现
+`[Lark] connected to wss://msg-frontier.feishu.cn/ws/v2`（这就是事件订阅长连接，无需再配 webhook）。
+
+### 坑
+
+1. **`oct_lib.call()` 返回 `(status, data)` 元组**，不是 dict——直接 `.get('data')` 会 AttributeError。而且 `data` **不一定是 dict**：`GET /api/agents` 返回的是 list，`json.loads(body)` 与 `body.get()` 一样会炸。固定写法 `code, items = O.call("GET", path, tok, None)`，再按 `isinstance` 分支。
+2. **channel 回读 `config` 是 `{}`**：服务端脱敏，不代表没写进去；判据看 `runtime.connected`。
+3. **channel 建立前发来的消息收不到**：建 channel 之前 BOSS 在私聊里说的话不会补投，必须让他重发一条验收。
+4. **二维码有效期 `expire_in` 实测 3600s**，别急着催；但进程必须一直挂着，进程死 = 码作废。
+5. **别转发别人抓的旧码**：设备授权码一次性，过期扫不动；每次自己重跑创建器拿新的。
+6. `feishu_bot_creator` 的 stdout 是**逐行 JSON**，`show_qrcode` 的 `content` 本身是**转义过的 JSON 字符串**，要二次 `json.loads`。
+7. 凭据落 `/opt/data/secrets/octop_feishu_app.json`（600），**不要写进 argv**（ps 可见）。
+
+## 6.8 群内直触发（不写 JSON 派活）
+
+业务节点不想碰总线文件时，让它在群里发一行 `octop:<别名> <问题>`：
+
+```bash
+/opt/data/bin/octop_grp.py "octop:小定 用一句话说明你能帮店群线算什么"
+```
+
+- 正则 `octop[:：]\s*(\S+)\s+(.+)`，中英文冒号都吃；别名走与 worker 同一张 `ALIAS`。
+- 结果落 `A2A/results/result_GRP-<ts>_octop_<ts>.md`，并在群里回 `【OCTOP:CODE】…` 一行。
+- 实测一次全链约 40s（小模型 + 无 RAG）。
+
+⚠️ **现形态是「小卡读到群消息 → 跑脚本」，不是独立 bot 监听**：要 7×24 无人值守必须另起常驻监听进程（读飞书长连接事件），否则小卡不在线就没人解析。交付时说清是哪一种，别让人以为已经能自动接话。
 
 ```bash
 /opt/data/bin/octop health          # ok:true, agents_running>0

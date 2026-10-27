@@ -50,6 +50,8 @@ curl -s -X POST https://api.hyperbrowser.ai/api/session \
 
 **session 与那条 CDP 连接同生共死**：连接一断（脚本正常退出、被 kill、未捕获异常）session 立刻不可用——`wsEndpoint` 重连必报 404 `session not found`，等几分钟也不会恢复。所以：**建 session、导航、操作、保活必须在同一个脚本、同一条连接里跑完**，不要分两次工具调用，也不要指望「先 kill 再换脚本重连」。要在连接内做多步操作，用动作文件驱动（见 muse-cloud-browser-redeem 的「单连接驱动模式」）。
 
+**免费档同时只允许 1 个 active session**，超了建新会 429 `Maximum number of active sessions (1) reached`。脚本退出后 session 可能仍以 active 状态占着名额；此时 `DELETE /api/session/<id>` 会 404、`POST .../stop` 不存在——正确关闭端点是 **`PUT /api/session/<id>/stop`**（返回 `{"success":true}`）。清名额一律先 `GET /api/sessions?status=active` 列出，逐个 PUT stop，再复核清零。
+
 ## 3. profile 持久化 cookie
 
 ```bash
@@ -97,6 +99,11 @@ curl -X POST https://api.hyperbrowser.ai/api/profile -H "Authorization: Bearer $
 - **启动前 `grep -n 'time.sleep=[^ (]' 脚本`**：`time.sleep=.5` 是合法 Python（给模块属性赋值），ast.parse 不报错，运行时把 `time.sleep` 变成 float，之后所有 sleep 全崩 `'float' object is not callable`。写完长流程脚本先跑这条 grep 再 launch。
 - **选择器撞名就换像素坐标**：聊天类页面的 `aria-label="More options"` 每个消息气泡都有一个，按序遍历永远点不到左下角真正的菜单。路径：截图 → vision 问目标按钮的像素坐标 → `pg.mouse.click(x,y)` → 用「页面文本是否出现菜单项」验证点对了，而不是假设点对了。
 - **每次重跑等待验证码的脚本前**：先确认旧等待进程已死 + `rm` 码文件。残留的旧进程/旧码文件会把用户报来的新码吃掉或配对到过期邮件；同时跟用户强调「只看最新一封邮件」，旧码提交会报 `incorrect or has expired` 白烧一次。
+- **按钮点击被 Cloudflare/模态浮层挡住时改用 JS 直点**：Playwright `.click()` 会卡在 actionability 检查上超时（Turnstile iframe 覆盖在按钮上方）。兜底用 `pg.evaluate` 遍历 `<button>` 找到目标直接 `el.click()`——DOM click 不走命中测试，浮层挡不住。用户过完人机框后由脚本 JS 提交，比让用户在 VNC 里找按钮稳。
+- **JS 找按钮必须精确匹配文案并排除 OAuth**：`/continue/i` 这类模糊正则会点中 "Continue with Google"，跳进 Google OAuth reCAPTCHA 挑战，整个会话作废。先按精确文案（`t==='continue'`）匹配，含 `google|apple|oauth` 的一律排除，最后兜底 `form button[type=submit]`。
+- **evaluate 回调参数别与外层变量重名**：`const b=bs.find(z=>!b.disabled)` 触发 TDZ `Cannot access 'b' before initialization`，整个 evaluate 抛异常——find 回调参数用别的名字（z/t）。
+- **长轮询循环里每个 evaluate 都要包 try/except**：页面导航会销毁执行上下文（`Execution context was destroyed`），未捕获异常让守候脚本当场崩掉、session 随之回收。捕获后 sleep 几秒重试即可。
+- **用户口头「成功/已登录」必须开新 session 核验**：页面可能停在未登录首页（提交后跳回、或画面未刷新造成假象）。判据：新 session 打开站点后右上角 Sign in/Sign up 是否消失；能发一句话并收到回复是最终验收。
 
 ### 邀请码兑换（被邀请方）的坑
 - **分清两个页面**：设置菜单里的 "Invite" 打开的多半是 **Invite friends（邀请别人）** 页——显示你自己的码 + "Scratch across the card" 刮刮卡，**没有输入框**，填不了别人的码。被邀请方真正的兑换入口在 **Settings → General → Redeem invite code**。判据：真兑换页必有可编辑的文本 input；只看到自己的码就说明点错了页，别在 Invite friends 页里瞎填。
@@ -111,6 +118,14 @@ curl -X POST https://api.hyperbrowser.ai/api/profile -H "Authorization: Bearer $
 - noVNC 截图技巧：liveUrl 画面就是云 Chrome 本体，新 session 默认停在 about:blank。要有内容的 VNC 图，先在**同一条脚本里**用 CDP 把 session 页面导航到目标网址（占住唯一的 CDP 连接），再从 BOSS Chrome 后台标签开 liveUrl 截图。
 - 免费档 POST /api/session 连开 3+ 次会 429 Too Many Requests（间隔几分钟才恢复）。截图任务把「开 session→导航→抓图」写进一个脚本一次跑完，减少 session 数；DELETE /api/session 收尾可能 404（session 已被回收），404 就当已删除，别重试。
 
+## 5c. Grok/xAI 注册与登录实测
+
+- **建号成功 ≠ 有登录态**：Create account 提交成功后页面可能直接跳回未登录首页，没有任何成功/错误提示。判成功以邮箱收到 `Thank you for creating a Grok Account`（validation code 邮件）为准，随后走登录流程核验，别把跳回首页误判为失败重注。
+- **注册和登录两步都有独立的 Cloudflare Turnstile**：表单填完按钮仍是灰的，必须人机框变绿才亮。表单填好后把 liveUrl 发给用户，脚本轮询「目标按钮从 disabled 变 enabled」作为人机框已过的信号；登录按钮让用户自己在 VNC 里点（表单状态已就绪，手动点最稳）。
+- **x.ai 的两类 6 位码邮件**：建号确认（subject 含 confirmation）与登录码（subject 含 sign-in）都发往同一邮箱、格式相同。取码脚本必须按 subject 关键字过滤只要流程需要的那种，否则旧确认码会被反复填进登录码框烧号。
+- **登录路径**：Sign in → 填邮箱 → Continue（精确匹配，见健壮性节 OAuth 坑）→ 密码 → Turnstile → Log in。也有无密码的 "Email login code" 路径，但要再收一封码邮件，优先走密码。
+- 卡壳重试时先查配额：`GET /api/sessions?status=active` 把残留会话 PUT stop 清干净再开新 session，否则 429。
+
 ## 6. 收尾
 
-脚本 `finally` 里 `DELETE /api/session/<id>`，免费额度按分钟计。
+脚本 `finally` 里 `DELETE /api/session/<id>`，免费额度按分钟计（404 就当已回收，别重试；占名额的用 PUT `/api/session/<id>/stop`）。

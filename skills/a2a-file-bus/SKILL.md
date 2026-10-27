@@ -120,6 +120,17 @@ zero bytes" rather than an error, so it reads like a broken tunnel instead of a 
   that into an exit 0 you read as success. Pull, push, then `git ls-remote origin main` and compare with
   local `HEAD`; also assert the file is in the remote tree (`git ls-tree --name-only origin/main
   outbox/ | grep <task_ref>`). 写进 NAS 共享目录 `/volume2/2-AI/A2A` 的文件**不等于**进了 Gitea 仓（宿主无 git、该目录不是工作树）；要入仓就在克隆里 `git add/commit/push`，再 `ls-remote` 比对。
+- **交付物不可变：修订一律用新回执，不改历史字段。** 已 push 的回执/result 是别人核过的证据，改了就
+  没法自证。要修正就写 `receipt_<ref>_<id>_<ts>_r2.json`，带 `revision` / `supersedes` /
+  `prev_result_sha256_8` / `result_sha256_8` / `reason`，让新旧两版同时可核（旧 commit 的
+  `git cat-file blob <旧sha>:<path>` 仍能取到原字节）。sha 变了要在回话里明说，别默默换值。
+- **对端说「路径不存在 / 查不到」时，先分清它看的是正本还是镜像，再看它克隆够不够深。** 浅克隆里
+  `git cat-file blob <sha>:<path>` 对超出深度的 commit 返回空——空返回是「这个 commit 不在我本地」，
+  不是「这个路径不存在」。先 `--deepen` 再下结论；目录计数用 `git ls-tree -r <ref> --name-only |
+  grep -c '^<dir>/'`（递归、指定 ref），`ls <dir> | wc -l` 是非递归，两者差一个数量级。
+- **回执的 `result_file` 写相对仓根路径，并标注镜像可见性。** 正文目录（`results/` 这类）按脱敏规则
+  不进公开镜像，只写 `results/x.md` 会让只有镜像读权的对端永远核不到；加一个
+  `result_visible_in_mirror: false`，或把单份外发副本放进镜像白名单目录。
 - **`to` must be the standard id**, not the display name, when the protocol table defines one —
   Chinese display names are accepted as aliases but ids are what scripts match on.
 - **A missing `[Mentioned:]` head or empty `mentions` on the Feishu side is unrelated to the bus.**
@@ -193,6 +204,10 @@ git log -1 --format=%ci HEAD       -- inbox/group_feed.jsonl     # 本地真实�
 排障顺序（照抄即可）：`git status` 是否干净 → `ls .git/rebase-merge .git/rebase-apply .git/MERGE_HEAD`
 → 手动 `git pull --rebase` 看真实报错 → `git rev-list --left-right --count origin/main...HEAD`
 → 手动跑一次 `./sync.sh` → `git ls-remote origin main` 与本地 HEAD 比对（这才是「真推上去了」的证据）。
+
+- **cron 里的 `git clone`（内网 Gitea）报 `could not determine hash algorithm` 或 404、而手工带凭据 ls-remote 却通 = 容器级 `http.proxy` 把内网请求劫进了 mihomo。** 全局代理对 `192.168.199.x` 一视同仁；修法是加主机豁免 `git config --global http.http://192.168.199.2:3000/.proxy ""`，别去改脚本。排障时要用 cron 的默认环境（不带任何显式凭据/代理参数）复现一次 clone 再下结论——手工带凭据测通不代表 cron 那条路通。
+- **查定时任务故障先读 cron 的 executions.db 逐轮 status/error，再读脚本。** `enabled=true` 只说明排了期；任务可能已连续失败多轮而 GitHub 侧停更数小时，唯一早信号是最近一次镜像 commit 的时间戳变旧。
+- **`~/.git-credentials` 条目按 host 字符串精确匹配，`:` 被编码成 `%3a` 与直写冒号是两个不同 key。** 排障前先打码列出全部条目并按 `user+host` 去重；凭据「存在」≠ helper 会选中它——最终判据是不带任何显式凭据的裸 `git clone/ls-remote` 能否成功。
 
 **冻结窗口会摘 cron**：迁移冻结时 peer 会把 A2A 那条 cron 从 crontab 删掉（留下
 `crontab.backup_<task_ref>.txt`），解冻后必须显式恢复，否则看起来「一切都对但就是不同步」。

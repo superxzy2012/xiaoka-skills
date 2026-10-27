@@ -72,3 +72,8 @@
 - 小卡本 app 实测收到 QUEEN/星期五 的 sender：`ou_b172b28aa8416f7fca826bc151b9cbb8`（gateway.log 14:42:36 原文，sender=bot:ou_b172...）
 - QUEEN 自报 `ou_cec7da8fb7c87ba06dcb4b2110c9ede1`：**作为 `<at user_id>` 输入可用**，飞书会自动 canonicalize 成 `ou_b172b28aa8416f7fca826bc151b9cbb8`（2026-10-23 实测：两个 id 同时 @，mentions 两项 id 都回落 ou_b172...，tenant 1acb5ce38507dc9e）。身份比对/白名单仍用实测值，@ 用哪个都行。
 - 我读不到群历史（230027 缺 im:message.group_msg），群内 @ 关系只能靠 gateway.log 事件流 + 总线
+
+## 2026-10-26 小林Hermes@muse 入册
+- 小林Hermes@muse = **BOSS 在 muse 沙箱 Ubuntu 里自装的 Hermes**（不是 muse.ai 网页那个 agent，也不是 htch-runtime）。飞书 open_id：`ou_61650305674ce25add41bb04f591d4a6`（本 app 视角，2026-10-26 BOSS 消息 mentions 实测）。只在飞书活动；网页 CDP 那个 muse 与它无关，禁止把运维指令发给网页 muse
+- 通道：GitHub `superxzy2012/swarm-a2a-bus` 的 **muse 分支**（main 是 10min force 重建的脱敏镜像，禁推）；中继 `/opt/data/bin/muse_relay.py` + cron `7865ec156a5b` 每 5min
+- 网页入口：BOSS Windows Chrome 9223（只绑 127.0.0.1，需 ssh -L 到 .184），技能 `muse-a2a-bridge`

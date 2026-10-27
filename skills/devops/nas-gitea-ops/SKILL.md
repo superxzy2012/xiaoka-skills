@@ -96,6 +96,18 @@ For a bus mirror use `auto_init:false` (leave it empty; the pushing side populat
 (idempotent-safe, treat as success). Random password: `"".join(secrets.choice(string.ascii_letters+
 string.digits) for _ in range(20))` — exclude `@ : #` and spaces so it survives in clone URLs.
 
+**建号 201 + 授权 204 都不证明这个账号能登录。** 建完立刻用**新账号自己的凭据**打一次
+`GET /api/v1/user`，必须回 `login=<login>`；回 `403 This account is prohibited from signing in`
+就是账号被置成禁用态（实测：建号时传 `max_repo_creation:-100` 会出现这个结果）。
+同一轮就 `PATCH /api/v1/admin/users/<login>` → `{"active":true,"prohibit_login":false,"max_repo_creation":0}`
+解禁并回读复核——别等到派活时对方报 403 才发现。想限制建仓用 `0` 或 `allow_create_organization:false`，
+**不要传奇怪的负值**。
+
+**管理面接口必须 Basic，不能拿登录密码当 Bearer。** `Authorization: Bearer <登录密码>` 打
+`/api/v1/admin/users` 返回 `401 invalid username, password or token`（那个位置的 Bearer 只认
+access token，不认密码），很容易误判成密码错而重建账号。要么 `Basic base64(login:password)`，
+要么先铸一个真 token。
+
 **蜂群内部 peer 直接 `--admin`。** `gitea admin user create --username <login> --email <login>@a2a.local --admin --must-change-password=false`：admin 自动对**所有**私有仓有读写，不必再逐个 `PUT …/collaborators` 授权，也不受 `allow_create_organization` 之类新用户默认值困扰。代价是它能看见全部仓库，所以**一个 peer 一个账号**（便于单独吊销、审计谁推了什么），不要多人共用一个号。给外部/半信任方仍走 §3 的 collaborator + §7 的 deploy key 最小授权路线。
 
 ### 3) Grant write
@@ -376,6 +388,16 @@ PREV==TAG，对比逻辑失效；③ 告警已在正文用 ⚠️ 标出，**退
 ④ 同一天 main 会前进多次，tag 推 Gitea 必须加 `--force`，否则第二次报
 `Updates were rejected because the tag already exists in the remote`。
 
+## 内网 Gitea 必须在 git 全局代理里豁免（2026-10-26 断流 14h 根因）
+NAS Hermes 容器全局 git 带 `http.proxy=http://192.168.199.2:7891`（mihomo），对所有 http.* 生效，包括内网 Gitea
+`http://192.168.199.2:3000`。clone 私有仓被代理劫持返回非 git 内容，报
+`fatal: .../info/refs not valid: could not determine hash algorithm; is this a git repository?`（或匿名 404）。
+极像「凭据丢了」，但 `~/.git-credentials` 里 Gitea 条目其实还在——真因是代理。根治：
+`git config --global http.http://192.168.199.2:3000/.proxy ""`（组网地址 `100.66.1.7:3000` 同样豁免）。
+判定顺序：①带账密 `git ls-remote http://<u>:<p>@host:3000/o/r.git HEAD` 通=凭据OK；②不带账密失败但加
+`git -c http.proxy=` 成功=代理劫持。镜像器 `a2a_gh_mirror.py` 的 GITEA 是匿名 URL，全靠 credential helper
++ 代理豁免；换容器/重建 home 后这两条都要复查。
+
 ## Pitfalls
 
 - **Read the live state before provisioning — a concurrent session may have already done it.**
@@ -388,6 +410,9 @@ PREV==TAG，对比逻辑失效；③ 告警已在正文用 ⚠️ 标出，**退
 - **`active:false` or a `<uid>+<login>@noreply.<host>` email in the user GET is not a failure.**
   Accounts created through the CLI/API report those while cloning and pushing perfectly; judge the
   account by the `push --dry-run` probe, not by those flags.
+- **建号成功 ≠ 可登录；`403 This account is prohibited from signing in` 优先于一切其它排查。**
+  只有拿到「新账号自己的凭据打 `GET /api/v1/user` 回 200」才算可用账号。协作者权限查得再漂亮，
+  账号被禁用时对方也只能看到 403，而 403 与 401（凭据错）是完全不同的两个故障，别混着查。
 - **`gitea` CLI run as root is a silent no-op** — it aborts with `mustNotRunAsRoot()` before doing
   anything, and the follow-up `SELECT id … WHERE lower_name='x'` returns empty, which reads like
   "the user wasn't created" when the real cause is the wrong uid. Always `docker exec -u git`.
