@@ -114,6 +114,15 @@ zero bytes" rather than an error, so it reads like a broken tunnel instead of a 
   （人转发、调度器重派、另一个 profile），先 `grep -l <task_ref> outbox/` 再 `session_search(<task_ref>)`；
   已有 `status=DONE` 的回执就只补一句「已完成，回执见 X」，不要重做。重复执行会产出两份时间戳不同的回执，
   peer 无法判断哪份是真的。
+- **被催「欠回执」时先回源核账，再决定写不写。** 调度方的记账可能停在它最后一次轮询那一刻：
+  `git log --oneline -- outbox/receipt_<ref>_<id>.json` 查出它其实已经迟交过（实测迟到约 19h 仍被判 ESCALATED），
+  再用 `gh api repos/<o>/<r>/contents/<path>?ref=main` 确认镜像也在。核账结果照实说三句：**在不在、迟到多久、
+  当时为什么没收到**——把「它当时记账是对的」也讲明白，比争谁对更有用。重写一份新回执只会让同一条任务
+  出现两个 DONE，而且把迟到这件事从账上抹掉了。
+- **镜像器自己生成的文件也要过同一把脱敏尺。** `state/tasks_index.json` 这类索引是从任务卡正文抽字段
+  拼出来的，会带出 tailnet IP；它不走「逐份 sanitize 源文件」那条路径，于是 leak-check 把自己生成的内容
+  判成泄露、整轮中止（症状：cron 的 `last_error` 是 `LEAK_CHECK_FAILED: ... (ip)`，而源仓里根本没有那个文件）。
+  修法：写盘前对拼好的字符串整体过 redactor；`127.0.0.1` 回环要豁免，否则带本地地址的任务卡会被判泄露。
 - **Pushing a receipt into the bus *git* repo: `git pull --rebase` first, then prove it left the box.**
   Several writers share that repo (peers, mirror jobs, your own cron), so a plain `git push` after a
   long task routinely dies non-fast-forward — and piping the push through a truncating filter turns

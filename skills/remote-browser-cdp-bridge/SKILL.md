@@ -107,6 +107,23 @@ browser, or a task needs a session (cookie jar) that only a real browser has.
 
 - **`Storage.getCookies` rejects `browserContextId: null`.** Passing the parameter at all —
   even as `None` — returns `-32602 Invalid parameters`. Send `{}` and filter by domain client-side.
+- **`__Host-` prefixed cookies cannot go through `context.add_cookies()`.** Passing `domain`
+  fails with `Invalid cookie fields`; passing `url` fails with `Cookie should have either url or
+  path`. Both are the same cause: `__Host-` requires `secure`, `path=/`, and **no** domain, which
+  playwright's cookie validator does not model. Inject those through a **page-level** CDP session
+  instead:
+  ```python
+  ctx.add_cookies([c for c in cookies if not c["name"].startswith("__Host-")])
+  pg = ctx.new_page()
+  cdp = ctx.new_cdp_session(pg)          # page-level; browser-level has no Network domain
+  cdp.send("Network.setCookie", {"name": n, "value": v, "url": "https://<host>/",
+                                 "secure": True, "sameSite": "Lax"})
+  cdp.detach()
+  ```
+  `b.new_browser_cdp_session()` rejects the same call with `'Network.setCookie' wasn't found` —
+  Network is a target-domain API, so the session has to ride a page. Get the split wrong and you
+  silently drop the session cookie while the page still renders: the site shows a guest/empty
+  shell, which reads as "login expired" rather than "one cookie never landed".
 - **Guessing a cookie's *name* to decide auth produces a false negative.** Don't test for
   `uid_tt`/`SESSDATA`/`sessionid` by memory — dump the actual names and match them against the
   full `Storage.getCookies` list, and key off presence of a value plus the cookie count moving.

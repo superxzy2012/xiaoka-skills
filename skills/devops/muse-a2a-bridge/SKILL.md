@@ -158,6 +158,29 @@ curl -s http://127.0.0.1:9223/json/list | python3 -c "import json,sys;[print(t['
 
 跑一律用 `/opt/data/.venv-browser/bin/python`（系统 python 没装 websocket-client）。
 
+### 二·五、不靠 BOSS 的 Windows：用 NAS 9222 + 注入 cookie 直开 muse.ai
+
+BOSS 的 Chrome 没开机 / 隧道没起时，还有一条**不碰他电脑**的路：NAS 上那个 headless Chrome（`192.168.199.2:9222`，带 grok 态）+ 从 muse2api 的登录态文件注入 cookie。
+
+登录态位置：`/home/DY/muse2api/data/accounts.json`（NAS 宿主，**DY 账号直接可读，不用 sudo**；`sudo -n` 只有 docker 免密，非 docker 命令一律要密码）。结构是 `[{label, cookies:{name: value}, ok, enabled, use_count, ...}]`，`cookies` 是 **dict 不是 list**。
+
+```python
+ctx = b.new_context(proxy={"server": "http://192.168.199.2:7894"}, viewport={...})
+ctx.add_cookies([c for c in cookies if not c["name"].startswith("__Host-")])
+pg = ctx.new_page()
+cdp = ctx.new_cdp_session(pg)          # __Host- 前缀必须走 page 级 CDP
+cdp.send("Network.setCookie", {"name": n, "value": v, "url": "https://muse.ai/",
+                              "secure": True, "sameSite": "Lax"})
+```
+
+已验证：注入后打开 `https://muse.ai/` 是**真实登录态**（有历史会话列表、Goals 页、BOSS 自己在跟踪的目标），不需要 BOSS 扫码。必须走 7894 代理，直连偶发 `ERR_CONNECTION_CLOSED`，加 3 次重试。
+
+**muse.ai 的界面骨架**（省得重新摸）：首页是 Chat；导航按钮 `Search / Feed / Ideas / Goals / Library`；Goals 页有 `Tracking`（在跟踪的目标）+ `Create a goal`（Health / Relationships / Finance / Career / Interests / Productivity / Something else 七个分类）。它是重度 Next.js SPA，点导航后 URL 不变，判断当前视图只能看哪个图标高亮或读 body 文本。
+
+⚠️ **`POST /api/falco` 不是业务接口**，是前端遥测（body 里是 `events:[{event:"perf", marker_id, ...}]`，回 `{"success":true,"accepted":N}`）。抓 `xhr/fetch` 时它会刷屏，别把它当 API 入口去逆向。**创建 goal 的接口目前还没逆向出来**——只到能点开创建面板，不要假设已有现成端点，也不要把它写成已可用能力。
+
+抓包时注意 `page.on("response")` 拿到的 `Response` **没有 `resource_type`**，要用 `r.request.resource_type`，否则事件监听里抛 `AttributeError` 会把整轮刷满 traceback。
+
 ## 三、SSH 出站审批（muse 平台侧，最费时间的坑）
 
 muse 的出站 SSH 被出口代理 `198.19.0.1:3128` 拦，报 `kex_exchange_identification: banner line 0: muse: Outbound SSH is turned...`。

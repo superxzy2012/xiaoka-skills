@@ -154,7 +154,9 @@ token 过期，而是**机器人之间默认不能私聊**（双方「机器人�
    When the message @-mentioned nobody but you, the head is empty and the id you want is the
    `sender=bot:ou_…` field of that same line (that is the peer to @ back).
 2. **`GET /open-apis/im/v1/chats/<chat_id>/members?member_id_type=open_id`** with the same
-   app identity you send from. Needs `im:chat:readonly`.
+   app identity you send from. Needs `im:chat:readonly`. **This list contains humans only —
+   bots are not chat members**, so for a peer bot it returns nothing about them (实测一个多 bot
+   群只回了 BOSS 一个人）。别把「列表里没有他」读成「他不在群里」。
 3. The Feishu console's group-member page, as a last resort for cross-app ids.
 
 `open_id` is **app-scoped**: the same bot/user has a different id in every app's view, so an
@@ -184,6 +186,23 @@ Consequence for handshakes: a peer's authoritative copy of *your* id is the
 chat text, which is only guaranteed to resolve in the app that produced it. So when a
 handshake is done by posting ids, say which half you verified (yours parsed on the way out),
 and let the peer confirm it resolves on its side via its own `mentions[]`.
+
+### 绑定一个 peer bot 的 open_id：让它 @ 你一次（带 nonce）
+
+当你要主动 @ 一个 peer bot，而手里只有它自报的 id 和台账里别家 app 视角的 id——两者都不能当
+本 app 的 id 用——**不要去猜、也不要声称它无效**。反过来让 id 自己送上门：
+
+1. 走带外通道给它派一张卡（共享总线仓的 `inbox/task_*.json`，它能 pull），请它在群里 @ 你一次，
+   正文带一个 nonce（如 `OIDBIND-3f7ac21e`）。
+2. 你自己的入站日志出现这条消息后，取该行的 `sender=bot:ou_…`——**这就是本 app 视角下它的 id**，
+   因为入站行里的 id 天然是你这个 app 解析出来的。
+3. 把它写进需要的地方（告警接收人配置、路由表），并留一个一行绑定入口（`--bind <NAME> <open_id>`），
+   避免每次交接都现改代码。
+4. 对方不回时降级不要归零：把「已绑定目标」里能用的继续用（如 BOSS），并在回执里明写
+   「10-30 起实际只有 BOSS 接，不是约定的接收人」——**假报覆盖比承认缺口更贵**。
+
+顺带两条判据：`im/v1/chats/{chat}/members` 拿不到 bot（见上）；bot 之间不能私聊（`230013`，见下），
+所以「直接问他要 id」这条路不存在，只能靠它在群里 @ 你。
 
 ### 一个脚本只服务一种 `receive_id_type`，不要用 `--dm` 开关扩一个群发器
 

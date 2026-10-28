@@ -132,7 +132,7 @@ BOSS 问这个时，**不许靠 config 注释、`providers.*.model` 声明，或
 
 ## 六、降级链（fallback）与 5xx failover
 
-症状指纹：`Provider temporarily unavailable — retrying automatically in 2s (cycle 1/5 … 5/5)` → `Automatic recovery gave up` → `HTTP 503: Service temporarily unavailable due to resource pressure`。**这不是模型名错（模型名错是 400），是上游容量压力 + 降级链没生效。**
+症状指纹：`Provider temporarily unavailable — retrying automatically in 2s (cycle 1/5 … 5/5)` → `Automatic recovery gave up` → `HTTP 503: Service temporarily unavailable due to resource pressure`。**这不是模型名错（模型名失效在这个网关上是 `404 模型不存在`，还带「目录里相近的模型」提示；`400` 是请求体/参数问题），是上游容量压力 + 降级链没生效。**
 
 ### 6.1 `fallback_providers` 只认字典，裸字符串被静默丢弃
 ```yaml
@@ -165,7 +165,7 @@ fallback_providers:
 ### 6.5 报错级联（Rate limited → 备用全 unreachable）：先分清「主 429」与「备不可达」
 
 症状指纹：`Rate limited` 与 `Provider unreachable` 交替刷，fallback 从主模型一路掉到末档，`5 automatic recovery cycles` 后放弃。
-这不是模型名错（那是 400），也常常不是降级链没配 —— 是**两个故障叠在一起**，只修一个仍会报错。
+这不是模型名错（那是 `404 模型不存在`，见 §6.6），也常常不是降级链没配 —— 是**两个故障叠在一起**，只修一个仍会报错。
 
 诊断必须在**出故障的那台机器**上做，不能在网关侧做：
 
@@ -198,6 +198,19 @@ curl -s -m8 -o /dev/null -w '%{http_code} %{time_total}s\n' http://<网关>/v1/m
 比翻 OmniRoute `call_logs` 快；journalctl 看不到这行是因为它写进 gateway 自己的日志文件。
 
 端到端验证：在群里 @ 那个 agent 让它只回一句短话，比 curl 更能证明「网关 → 模型 → 回复」整链通。
+
+### 6.6 模型名失效（`404 模型不存在`）：三连败后 agent 静默不出话
+
+指纹：`openai.NotFoundError: Error code: 404 - {'error': {'message': '[...] [404]: 模型不存在: <旧名>（目录里相近的模型: <新名>）'}}` → `API call failed after 3 retries` → 该 agent 之后再不出话。**群消息/截图里那句 "rate limit" 是遮挡**，真因只在被修机器的 `errors.log` 里；凭症状猜会一路猜错。
+
+排查顺序（三步，别跳）：
+1. **列目录确认名字在不在**：`GET <base>/v1/models` 必须带 key —— 匿名请求回 `401 AUTH_002 Authentication required`，看起来像「目录空/网关挂」，其实是没认证。
+2. **候选名逐个真打一发**，不能拿「目录里有」当可用：同一族里 `a2a/<x>` 回正常内容、`a2a/sn-<x>` 可能 HTTP 200 但 `content` 为空。选真能回内容的那个。
+3. **两处同改**：`model.default` 与 `providers.<p>.model`（两处不一致时，网关请求用的是 `providers.*.model`）。改完重启 gateway。
+
+验收三层，缺一层不算修好：① `Model context warmed: <新名> -> N tokens (config)`；② 之后 `errors.log` 不再新增 404；③ **真实回合**——群里 @ 那个 agent 让它回一句，日志出现 `Turn ended: reason=text_response(finish_reason=stop)` + `response ready ... response=N chars`。只看到「模型已加载」不等于能出话。
+
+**潜伏性**：模型名失效不会让 gateway 崩，只让该 agent 每次三连败后闭嘴，除日志外零告警（可潜伏数天）。给 agent 的健康检查加一条「近 30 分钟是否出现 `模型不存在`」，别等群里发现它不说话。远端机器上的改法（备份、逐行替换、重启、平台首连超时自愈）见技能 `windows-remote-access`。
 
 ## 八、按任务选免费模型（2026-10-20 全量实测）
 

@@ -102,6 +102,25 @@ for c in sel:
                   "width": box["w"]+24, "height": box["h"]+24, "scale": 3}})
   ```
 
+## 新开隔离上下文（注册新账号 / 不污染登录态）
+
+要在一个**已登录**的 Chrome 里做「未登录」的事（注册小号、验证另一个账号、看游客态），不要动 `b.contexts[0]`，用 `b.new_context()` 开无痕上下文：不激活标签、不抢 BOSS 焦点、不碰他现有 cookie。
+
+```python
+ctx = b.new_context(proxy={"server": "http://<NAS_IP>:7894"},
+                    locale="en-US", timezone_id="America/New_York")
+```
+
+三条必设，缺一条就卡住：
+
+- 🔴 **新 context 不继承浏览器代理。** CDP 连的浏览器跑在 BOSS 机器上，`new_context()` 出来的是直连；大陆环境 `goto` 会一直停在 `about:blank` 直到超时（`Page.goto: Timeout`），看着像网站挂了。必须显式传 `proxy`。
+- 🔴 **`locale` 决定站点文案语言。** BOSS 的 Chrome 是中文，同一个注册页会渲染成「使用邮箱注册」，`get_by_text("Sign up with email")` 直接 8s 超时。要么 `locale="en-US"` 强制英文，要么选择器同时兜底中英文案。
+- 🔴 **Cloudflare 挡 headless 的 POST，`cf_clearance` 救不了。** 无头 Chrome 提交表单时后端返 `403 Attention Required`（HTML 挑战页），前端当 JSON 解析，页面显示 `Unexpected token '<', "<!DOCTYPE "... is not valid JSON`——这句就是「被 CF 挡了」的指纹，不是接口报错。实测带齐 `cf_clearance`/`__cf_bm`、换两个代理出口都一样，是浏览器指纹层。**解法只有换真实浏览器**（BOSS 的 Windows Chrome 9223）。判据：GET 能过、POST 过不去，就往这上面想。
+
+**Windows 9223 隧道**：它只绑 `127.0.0.1`，复用 `/opt/data/memories/zsxq_refresh_cookie.py` 里的 `ensure_tunnel()`（已处理主机探测与隧道复用），先 `curl 127.0.0.1:9223/json/version` 探活再连。注意 `importlib` 加载该模块会执行它的顶层流程（会顺带跑一遍星球抓取），只想借函数就复制出来，别直接 exec_module。
+
+**验证码类流程必须常驻等码。** 注册要邮箱验证码，收件箱在 BOSS 手里。脚本不能「提交完就退出」——context 一断就得重发码、旧码作废。正确形状：提交 → 写日志 → 轮询 `<scratch>/xxx_code.txt`（15 分钟窗口）→ 拿到码继续 → 抓 cookie；用 `background=true, persist_on_release` 挂着，并告诉 BOSS 码发到哪个邮箱、等多久。
+
 ## 权限与红线
 - 支付/下单前必须 BOSS 明确确认，CDP 也不例外。
 - BOSS 关机 → CDP 断，浏览器能力整体不可用（架构约束，非 bug）；汇报时先排除这个原因再排查别的。

@@ -54,6 +54,10 @@ python3 -c "import re;d=open('/Applications/<X>.app/Contents/Resources/app.asar'
 - **网页 Cookie 系**（DeepSeek、GLM、Kimi、MiniMax、Qwen、Z.ai、Perplexity）→ xiaoY233/Chat2API（Electron 桌面版，需 Xvfb 容器化）。
 - 两边都支持的（Kimi）优先走 OAuth，Cookie 会随网页改版失效。
 
+### 浏览器型上游：容器内 Chromium + CDP
+
+有些站没有可用的协议逆向，只能让容器里的 Chromium 真点网页（muse.ai 已跑通，见 `references/cdp-browser-gateway.md`）。要点：代理必须打进 Chromium 启动参数（环境变量无效）、登录是导入 cookie 而非扫码、媒体 URL 要带 key 才下得动、「UA 绑定」不必预先防范。
+
 ## 部署 CLIProxyAPI（NAS，已验证）
 
 ```bash
@@ -102,6 +106,17 @@ OAuth 的 redirect_uri 是 `http://localhost:<port>`，**浏览器在哪台机�
 3. **SSH 端口转发**：BOSS 机器上 `ssh -L <port>:127.0.0.1:<port>` 把回调口转给容器。
 
 不要试图把容器端口映射成回调地址——redirect_uri 由上游写死，映射无效。
+
+### 补账号（免费额度不够时）
+
+免费号额度按档位/滚动窗口计，打光后最便宜的扩容是**再注册一个账号拿 cookie**，不是充值。两条已验证的前提：
+
+- **用 Gmail `+tag` 别名注册**（`user+grok2@gmail.com`）：验证码照样进同一个收件箱，不需要新邮箱、不需要新手机号，也不会和主账号混。
+- **收码那一步必须 BOSS 配合**：脚本设计成后台常驻等码文件，而不是一次跑完（context 断了要重发码，旧码作废）。
+
+机制层的坑——headless 被 Cloudflare 挡 POST、必须接真实 Chrome、`new_context` 不继承代理、locale 影响选择器——见 skill `cdp-browser-automation` 的「新开隔离上下文」一节。
+
+新 cookie 拿到后按各家网关的账号文件格式追加（grok2api 是 `accounts.txt`，Netscape 7 字段），**追加完要重启进程并实测一条真实 chat**：`/v1/models` 列出模型不代表新账号可用。
 
 ### 复用已有机器上的登录态（跨机搬迁，已验证）
 
