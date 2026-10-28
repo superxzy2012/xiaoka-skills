@@ -45,17 +45,23 @@ grok-fast / grok-auto / grok-expert / grok-heavy(A2A 默认) / grok-build。
 
 `grok-auto` 看着「智能」，实际一遇到需要推理的问题就升到 Grok-4，5 条打光后全线报额度，用户体感就是「怎么老提示额度」。日常问答 `grok-fast` 足够；真要深推理让用户 `/expert` 单次切过去。
 
+**桥已内置 auto→fast 自动降级**：`handleGrokReply` 里若首选档命中 `usage limit|quota|rate` 且当前不是 `grok-fast`，自动重试一次 `grok-fast`，报错文案里带上实际用的档位。用户即使 `/auto` 撞了 Grok-4 的 5 条墙，也能立刻拿到答案而不是看到死路。
+
+**会话档位存在内存 `chatModel` Map 里，重启桥即清空**（回到 `.env` 的 `GROK_MODEL`）。用户说「某个会话老提示额度」而全局默认已经是 `fast` 时，先怀疑该会话被 `/auto` 过——重启桥比逐会话发 `/fast` 快。
+
 ## 看门狗
 
 grok2api 由 hermes cron 每 5 分钟巡检（`/opt/data/scripts/grok2api_watchdog.sh`，no_agent+deliver=local，零模型成本）。容器重建后必须确认 45080 活着。
 
 **改看门狗前先确认 cron 到底调的是哪个文件。** `~/.hermes/scripts/`（本机即 `/opt/data/scripts/`）才是 cron `script` 字段的解析根；`/opt/data/services/grok2api/watchdog.sh` 那份同名文件**没有任何 job 引用它**，改它等于没改，下一轮故障照旧没人管。查法：`cron/jobs.json` 里找到该 job 的 `script` 字段，或 `cronjob_manage action=list` 看 `script`。判据不是「我改了个看门狗」，是**那个被调用的文件里包含新判据**。
 
-**健康判据是 `available>0`，不是 `"ok":true`。** 实测出现过 `ok:true` 但 `available:0`：进程活着、端口通，但内部 statsig/session 状态坏了，上层表现为 `grok error (upstream): connect failed: ConnectionResetError`。只查 `ok:true` 的看门狗会认为健康而全程不作为。判据写 `ok:true && available>0`，连续 2 轮为 0 才重启（避免真·额度耗尽时反复重启空转），重启后等 40~45s 再验。
+**健康判据是 `available>0`，不是 `"ok":true`。** 实测出现过 `ok:true` 但 `available:0`：进程活着、端口通，但内部 statsig/session 状态坏了，上层表现为 `grok error (upstream): connect failed: ConnectionResetError`。只查 `ok:true` 的看门狗会认为健康而全程不作为。判据写 `ok:true && available>0`，连续 2 轮为 0 才重启（避免真·额度耗尽时反复重启空转），重启后等 **100s** 再验。
 
 **但 `available:0` 本身不等于坏。** 它有两个来源：①账号撞 quota 后进入 `COOLDOWN_SECONDS`（默认 300s）冷却；②内部状态真坏。区分靠**实际发一次请求**：`curl -s -X POST http://127.0.0.1:45080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"grok-fast","messages":[{"role":"user","content":"好"}]}'` —— 能回就只是冷却/空闲，别重启；报 ConnectionReset/SSL 才是真坏。
 
-**也别把 `statsig_ready:false` 当故障。** 实测 `available:1`、请求 4 秒正常返回时它照样是 `false`——statsig 是旁路懒加载状态，只有「`available:0` **且** 实际请求失败」才说明进程坏了。同理，重启后 40~45s 仍 `available:0` 时先发一次探活请求再判断，很多「重启没生效」其实是首次请求还没触发账号状态刷新。
+**也别把 `statsig_ready:false` 当故障。** 实测 `available:1`、请求 4 秒正常返回时它照样是 `false`——statsig 是旁路懒加载状态，只有「`available:0` **且** 实际请求失败」才说明进程坏了。同理，重启后 100s 内仍 `available:0` 时先发一次探活请求再判断，很多「重启没生效」其实是首次请求还没触发账号状态刷新。
+
+🔴 **看门狗重启后的等待必须 ≥100s，别用 45s。** `available` 从 0 到 1 实测要 ~90 秒（statsig 初始化慢）；只等 45s 会把「正在预热」判成失败，日志里刷满 `restart FAILED`，而进程其实已经起来了——表现为看门狗每 5 分钟「杀掉→拉起→报失败」空转数小时，服务被反复中断。判据不是「日志说 FAILED」，是**探活请求能不能回**。
 
 重启时**必须精确 kill**：`ps -eo pid,args | grep "[m] uvicorn server:app" | awk '{print $1}' | while read p; do kill $p; done`。用 `pkill -f "uvicorn server:app"` 会匹配到执行这条命令的 shell 自己，命令 exit -15、后续重启步骤全不执行。
 
@@ -174,6 +180,17 @@ A2A worker 那条路径已有自己的 system prompt（蜂群 worker 人格）�
 ## 新增一个机器人（通用配方）
 
 同一套桥可以给任意「网页版模型 → OpenAI 兼容」上游复制一份。muse 机器人是第二例：飞书 app `cli_aa6a5bfc0cb8dd00`、宿主 `/home/DY/muse-feishu/`、上游 muse2api `:18610`、A2A 别名 `muse2api`。顺序固定：建应用 → 取 secret → 起桥 → 测发送 → 测接收 → 登记 A2A。
+
+🔴 **接一个新平台前先确认它有没有官方 API——有就别逆向网页。** 逆向（grok2api/muse2api 那套）是拿不到官方接口时的兜底，维护成本全在「页面/接口一改就废」。已核实的对照：
+
+| 平台 | 有无官方 API | 结论 |
+|---|---|---|
+| Grok 网页版 | 无（免费号） | 只能逆向；免费额度按档位分，见上表 |
+| Muse | 无 | 逆向 muse2api `/v1/chat/completions` |
+| Manus | **有**：`https://api.manus.ai` v2，`x-manus-api-key` 或 OAuth，含 task/project/file/**webhook** | 优先接官方，webhook 天然适配「派单→完成→推回」 |
+| Cue（cue.im，Manus 2.0 的独立 app） | **无**，只有手机/桌面 App | 接不进飞书；它的「独立电话/邮箱/钱包/云电脑」能力也没在 Manus API 里暴露 |
+
+别把 Cue 和澳洲的 Cue AI（cueai.app，规划器 App）搞混——两个产品同名不同家。
 
 **1. 建应用走「一键创建智能体应用」**：`https://open.feishu.cn/page/launcher?from=backend_oneclick`，只填名称 + 头像，提交即自动预置机器人能力、长连接订阅、权限，并直接发布 1.0.0。
 - 别用「创建企业自建应用」对话框：强制 240px+ 图标，上传后弹裁剪编辑器，点「创建」静默不提交（URL 停在列表页，没有任何报错），还要自己逐项补能力+权限+发布。
